@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: registry.cn-hongkong.aliyuncs.com
-  NAMESPACE: summary-task
+  NAMESPACE: chatwithpaper
   IMAGE: summary-task
   TAG: ${{ github.event.inputs.release_tag || github.event.client_payload.release_tag }}
 
