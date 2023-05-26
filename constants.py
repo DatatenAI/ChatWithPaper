@@ -1,0 +1,2 @@
+FREE_TOKEN = 70000
+PDF_SAVE_DIR = "./out"
