@@ -1,4 +1,5 @@
 import json
+import threading
 
 import flask
 from dotenv import load_dotenv
@@ -15,7 +16,8 @@ def invoke():
     summary_id = flask.request.args.get('summary_id')
     if summary_id is None:
         return 'failed'
-    handler(json.dumps({"summary_id": summary_id}))
+    dumps = json.dumps({"summary_id": summary_id})
+    threading.Thread(target=handler, args=(dumps,)).start()
     return 'success'
 
 
