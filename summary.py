@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 
+import flask
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -14,6 +15,7 @@ import pdf_summary
 import redis_manager
 import user_db
 import util
+from flask import Flask
 
 logger.opt(exception=True)
 PDF_SAVE_DIR = os.getenv("FILE_PATH")
@@ -150,7 +152,3 @@ def handler(event_str):
     except Exception as e:
         logger.error(e)
 
-
-if __name__ == '__main__':
-    logger.info(f"os env: {os.environ}")
-    handler('{"summary_id":"5e13cdbfc20453746daf8e99da766a74_中文"}')
