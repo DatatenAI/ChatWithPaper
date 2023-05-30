@@ -251,8 +251,7 @@ Original text:
 Remember to:
 - Retain proper nouns in English.
 - Do not output vague statements without a specific name or value.
-- Methods shoould be as detailed as possible. 
-- Motivation needs to retain the logic of the Original text.
+- Methods shoould be as detailed as possible, and introduce step by step if necessary. 
 - Results should be as specific as possible, keep specific nouns and values.
 - When output, never output the contents of () and () of Output Format.
 - Ensure that the response is well-structured, coherent, and addresses all sections.
@@ -367,9 +366,9 @@ Organize your response using the following markdown structure:
 
 # Background (next, you should output as {lang}):
 
-- xxx (Whole research background).
-- xxx (Introduce past methods and their problems)        
-- xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
+- BackGround: xxx (Whole research background).
+- Past methods: xxx (Introduce past methods and their problems)        
+- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
 
 Remember to:
 - Ensure that the response strictly follows the provided format and does not include any additional content. 
