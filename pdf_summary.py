@@ -397,7 +397,7 @@ async def process_sentence(sentence: str, n: int):
         return e
 
 
-async def get_condensed_text(
+async def get_condensed_text(        
         text,
         n,
         condensed_length: int = 3000,
@@ -414,9 +414,22 @@ async def get_condensed_text(
                       "summarization, while preserving the original meaning."
     )
     words_num = math.ceil(condensed_length / n)
-    content = f"I need your help to extract the core points of the text below using concise and academic language. " \
-              f"Preserve the original meaning, keeping the length between {words_num} and {words_num + 100} words. Use " \
-              f"{language} language. Here is the original text: {text}"
+    # 需要提取核心的内容，比如设置，方法，过程，数据，结论等。
+    content = f"""Based on the current text content {text}, you should determine which section the text belongs to "Methods, Experimental settings, and Experimental details" or others.
+    If there is a corresponding section, you should output a specific description; if not, a section is ignored.
+    If the text contains the Method section, you need to summarize the method in detail, step by step. 
+    If the text contains experimental setting, you need to summarize the experimental setting in detail.
+    If the text contains experimental results, you need to summarize the experimental performance according to current text.
+    Remember:                                                                    
+    - You must keep concise and clear, and output as English.
+    - You should maintain the key data, nouns, settings, and other specific valuable information in the original text, and retain the original logic and correspondence.
+    - Do not output any specific data when the current text does not exist!
+    - Output as following format:
+    Section Name:
+        Content.
+        
+    """
+    
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
