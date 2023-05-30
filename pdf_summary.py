@@ -14,7 +14,7 @@ from util import retry, token_str, gen_uuid
 
 chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo",
                                               top_p=1,
-                                              temperature=1.0,
+                                              temperature=0.0,
                                               apiTimeInterval=0.02)
 
 
