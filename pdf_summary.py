@@ -273,6 +273,31 @@ Remember to:
     logger.info("end get paper summary")
     return result[0], result[3]
 
+async def translate_summary(text, lang: str) -> tuple:
+    logger.info("start translating paper summary")
+    convo_id = "read_paper_summary" + str(gen_uuid())
+    chat_paper_api.reset(
+        convo_id=convo_id,
+        system_prompt=
+        "You are a research scientist and you are translated the summary with concise language and keep the same format."    
+    )
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
+    text = truncate_text(text)
+    logger.info(f"truncate_text length:{len(text)}")
+    content = f"""Original Summary is as follows: {text}, please translate it into {lang}. 
+    Remember to:
+    - Retain proper nouns in original language.
+    - Retain authers in original language.
+    """
+    result = await chat_paper_api.ask(prompt=content,
+                                      role="user",
+                                      convo_id=convo_id)
+    chat_paper_api.conversation[convo_id] = None
+    print_token("get_paper_summary_translation", result)
+    logger.info("end get paper summary translation")
+    return result[0], result[3]
+
 
 def truncate_text(text, max_token=2560, steps=None):
     if steps is None:
