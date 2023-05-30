@@ -30,7 +30,7 @@ async def get_the_formatted_summary_from_pdf(
         logger.info(f"{new_path} formatted txt not exists")
         try:
             complete_sum_res, token_cost = await get_the_complete_summary(
-                pdf_file_path)
+                pdf_file_path, language)
         except Exception as e:
             raise Exception(str(e))
         token_cost_all += token_cost
@@ -63,7 +63,7 @@ async def get_the_formatted_summary_from_pdf(
             return res, token_cost_all
 
 
-async def get_the_complete_summary(pdf_file_path: str) -> tuple:
+async def get_the_complete_summary(pdf_file_path: str, lang: str) -> tuple:
     logger.info("start get complete summary")
     base_path, ext = os.path.splitext(pdf_file_path)
     new_path = f"{base_path}.complete.txt"
@@ -73,7 +73,7 @@ async def get_the_complete_summary(pdf_file_path: str) -> tuple:
     # 开始处理长文本内容。
     if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:
         result, token = await rewrite_paper_and_extract_information(
-            pdf_file_path)
+            pdf_file_path, lang=lang)
         token_cost_all += token
         async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
             await f.write(result)
@@ -82,7 +82,7 @@ async def get_the_complete_summary(pdf_file_path: str) -> tuple:
         sentences = get_paper_split_res(pdf_file_path)
         if len(sentences) == 0:
             raise Exception("there is no text in the paper")
-        tasks = [process_information(sentences[0], pdf_file_path)]
+        tasks = [process_information(sentences[0], pdf_file_path, lang=lang)]
         result, token_cost = await asyncio.gather(*tasks)
         token_cost_all += token_cost
     async with aiofiles.open(new_path, "r", encoding="utf-8") as f:
@@ -91,7 +91,7 @@ async def get_the_complete_summary(pdf_file_path: str) -> tuple:
     return result, token_cost_all
 
 
-async def rewrite_paper_and_extract_information(path: str) -> tuple:
+async def rewrite_paper_and_extract_information(path: str, lang: str) -> tuple:
     # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
     sentences = get_paper_split_res(path)
@@ -102,7 +102,7 @@ async def rewrite_paper_and_extract_information(path: str) -> tuple:
     tasks = [
         process_sentence(sentence, sentences_length) for sentence in sentences
     ]
-    tasks.append(process_information(sentences[0], path))
+    tasks.append(process_information(sentences[0], path, lang=lang))
     results = await asyncio.gather(*tasks)
     rewrite_str = ""
     token_cost = 0
@@ -230,12 +230,7 @@ including what methods were used, what problems were solved and what results wer
 
 # Brief introduction:
    - xxx
-   
-# Background:
-   - xxx (Research background).
-   - xxx (Past methods and their problems)        
-   - xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
-   
+      
 # Methods:
    - xxx (Theoretical basis of the study)    
    - xxx (Technical route of the article (step by step))
@@ -315,13 +310,14 @@ def truncate_text(text, max_token=2560, steps=None):
     return text[:split_pos]
 
 
-async def process_information(sentence: str, path: str):
+async def process_information(sentence: str, path: str, lang: str):
     try:
         result = await retry(
             3,
             conclude_basic_information,
             path=path,
             text=sentence,
+            lang=lang
         )
         return result
     except Exception as e:
@@ -329,7 +325,7 @@ async def process_information(sentence: str, path: str):
         return e
 
 
-async def conclude_basic_information(path: str, text: str):
+async def conclude_basic_information(path: str, text: str, lang: str):
     logger.info(f"start conclude basic information,path:{path}")
     base_path, ext = os.path.splitext(path)
     con_path = f"{base_path}.firstpage_conclusion.txt"
@@ -351,14 +347,14 @@ async def conclude_basic_information(path: str, text: str):
         + text,
         role="system",
         convo_id=convo_id)
-    content = """Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
+    content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
 
         1. Identify the title of the paper (with Chinese translation)
         2. List all authors' names (in English)
         3. Indicate the first author's affiliation (with Chinese translation)
         4. Highlight the keywords of this article (in English)
         5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
-
+        
 Organize your response using the following markdown structure:
 
 # Basic Information:
@@ -369,7 +365,19 @@ Organize your response using the following markdown structure:
 - Keywords: xxx
 - URLs: xxx or xxx , xxx
 
-Ensure that the response strictly follows the provided format and does not include any additional content. Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
+# Background (next, you should output as {lang}):
+
+- xxx (Whole research background).
+- xxx (Introduce past methods and their problems)        
+- xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
+
+Remember to:
+- Ensure that the response strictly follows the provided format and does not include any additional content. 
+- Make sure your output is comprehensive and accurate!
+- Retain proper nouns in English.
+- Motivation needs to retain the logic of the Original text.
+- When output, never output the contents of () and () of Output Format.
+- Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
 """
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
@@ -424,6 +432,7 @@ async def get_condensed_text(
     - You must keep concise and clear, and output as English.
     - You should maintain the key data, nouns, settings, and other specific valuable information in the original text, and retain the original logic and correspondence.
     - Do not output any specific data when the current text does not exist!
+    - In short, make sure your output is comprehensive and accurate!
     - Output as following format:
     Section Name:
         Content.
