@@ -364,11 +364,11 @@ Organize your response using the following markdown structure:
 - Keywords: xxx
 - URLs: xxx or xxx , xxx
 
-# Background (next, you should output as {lang}):
+# Background (next, you should output as {lang}!):
 
-- BackGround: xxx (Whole research background).
-- Past methods: xxx (Introduce past methods and their problems)        
-- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
+- BackGround: xxx (Whole research background, output as {lang}!).
+- Past methods: xxx (Introduce past methods and their problems, output as {lang}!)        
+- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper, output as {lang}!)        
 
 Remember to:
 - Ensure that the response strictly follows the provided format and does not include any additional content. 
