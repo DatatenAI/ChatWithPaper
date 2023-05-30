@@ -11,6 +11,7 @@ from loguru import logger
 import optimize_openai
 from util import retry, token_str, gen_uuid
 
+
 chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo",
                                               top_p=1,
                                               temperature=1.0,
@@ -69,6 +70,7 @@ async def get_the_complete_summary(pdf_file_path: str) -> tuple:
     first_page_path = f"{base_path}.firstpage_conclusion.txt"
     result = None
     token_cost_all = 0
+    # 开始处理长文本内容。
     if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:
         result, token = await rewrite_paper_and_extract_information(
             pdf_file_path)
@@ -90,6 +92,7 @@ async def get_the_complete_summary(pdf_file_path: str) -> tuple:
 
 
 async def rewrite_paper_and_extract_information(path: str) -> tuple:
+    # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
     sentences = get_paper_split_res(path)
     if len(sentences) == 0:
@@ -110,45 +113,74 @@ async def rewrite_paper_and_extract_information(path: str) -> tuple:
     logger.info("end rewrite paper and extract")
     return rewrite_str, token_cost
 
+def find_next_section(text):    
+    pattern = r'\n[A-Z]'
+    match = re.search(pattern, text)
+    if match:        
+        return match.start()
+    else:
+        return 0
 
 def get_paper_split_res(
         path: str,
         split_page: int = 2,
         extract_last: bool = True,
         max_token: int = 2560) -> list[str]:
-    steps = [800, 400, 200]
+    string_steps = [800, 400, 200]
+    
     with fitz.open(path) as doc:
         text = ''.join(page.get_text("text") for page in doc)
-    text = re.sub(r"(References|Acknowledgments)[\s\S]*", "", text)
+    logger.info(f"{len(text.split(' '))} original text words")
+    # clip text by reference
+    reference_index = text.lower().find("references")
+    if reference_index > 0:            
+        main_text = text[:reference_index]
+    else:
+        reference_index = text.find("References")
+        main_text = text[:reference_index]
+    text = main_text
+    logger.info(f"{len(text.split(' '))} clip text words")
+    
+    # split by words
     res = []
     num_split = len(text) // max_token
-    for _ in range(min(split_page, num_split)):
-        split_pos = 0
-        while split_pos < len(text):
-            for step in steps:
-                next_step = min(step, len(text) - split_pos)
-                temp_text = text[:split_pos + next_step]
+    logger.info(f"{num_split} original num_split")
+    # split by tokens
+    num_split = token_str(text) // max_token + 1
+    logger.info(f"{num_split} token num_split")
+    
+    # 接下来将text分割成num_split个部分, 且每个部分之间的间隔是按照\n 大写字母来分割的。
+    for index in range(num_split):
+        # 每个部分都从第一个字符开始
+        split_str_index = 0
+        # 当切分字符小于最大的字符数时，继续切分
+        while split_str_index < len(text):
+            # 逐步切分，每次切分的字符数是string_steps中的一个值
+            for step in string_steps:
+                # 下一次切割的字符数，是step和剩下的字符数中的最小值
+                next_str_step = min(step, len(text) - split_str_index)
+                # 先加上下一次切割的字符数，看看是否超过了最大的字符数
+                temp_text = text[:split_str_index + next_str_step]
+                # 如果没有超过，那么就把本次切割字符数加上去
                 if token_str(temp_text) <= max_token:
-                    split_pos += next_step
+                    # 把切割字符数加上去，跳出循环，进行下一次切割
+                    split_str_index += next_str_step
                     break
+            # 如果切割字符数超过了最大的字符数，那么就把上一次的切割字符数作为切割的字符数
             else:
+                # 到了最大的切割字符，需要补齐一下最近的一个段落索引。
+                temp_split_str_index = find_next_section(text[split_str_index:])
+                # 先测测加上这个字符数是否超过了最大的字符数
+                temp_text = text[:split_str_index + temp_split_str_index]
+                # 如果没有超过，那么就把补齐的索引加上
+                if token_str(temp_text) <= max_token+100:
+                    # 把切割字符数加上去，跳出循环，进行下一次切割
+                    split_str_index += temp_split_str_index                        
+                # 如果超过了，那么就不加了，直接跳出循环
                 break
-        res.append(text[:split_pos])
-        text = text[split_pos:]
-    if not extract_last:
-        return res
-    if num_split > split_page:
-        split_pos = 0
-        while split_pos < len(text):
-            for step in steps:
-                next_step = min(step, len(text) - split_pos)
-                temp_text = text[-(split_pos + next_step):]
-                if token_str(temp_text) <= max_token:
-                    split_pos += next_step
-                    break
-            else:
-                break
-        res.append(text[-split_pos:])
+        res.append(text[:split_str_index])
+        # 把text更新成剩下的部分
+        text = text[split_str_index:]  
     return res
 
 
@@ -182,55 +214,40 @@ async def get_paper_summary(text, lang: str) -> tuple:
     chat_paper_api.reset(
         convo_id=convo_id,
         system_prompt=
-        "You are a research scientist and you are skilled at summarizing academic papers using concise language."
+        "You are a research scientist and you are skilled at summarizing academic papers using concise language."    
     )
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
     text = truncate_text(text)
+    logger.info(f"truncate_text length:{len(text)}")
     content = f"""When summarizing the text, focus on providing clear and concise information. Highlight key 
     concepts, techniques, and findings, and ensure the response is well-structured and coherent. Use the following 
     markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
     maintaining proper academic language:
+    
+You should first summarize this work in one sentence, the language should be rigorous, in the style of a popular science writer,
+including what methods were used, what problems were solved and what results were achieved. And then start summarizing the rest of the story, Output Format as follows:
 
-# Summary:
-   - a. Research background of this article:
-        - xxx
-   - b. Past methods, their problems, and motivation:
-        - xxx
-   - c. Research methodology proposed in this paper:
-        - xxx
-   - d. Task and performance achieved by the methods in this paper:
-        - xxx
-
+# Brief introduction:
+   - xxx
+   
 # Background:
-   - a. Subject and characteristics:
-        - xxx
-   - b. Historical development:
-        - xxx
-   - c. Past methods:
-        - xxx
-   - d. Past research shortcomings:
-        - xxx
-   - e. Current issues to address:
-        - xxx
-
+   - xxx (Research background).
+   - xxx (Past methods and their problems)        
+   - xxx (Motivation: How does the author move from background knowledge to the research in this paper)        
+   
 # Methods:
-   - a. Theoretical basis of the study:
-        - xxx
-   - b. Technical route of the article (step by step):
-        - xxx
-        - xxx
-        - xxx
-        - ...
+   - xxx (Theoretical basis of the study)    
+   - xxx (Technical route of the article (step by step))
+        
+# Results:
+   - xxx (Experimental settings)        
+   - xxx (Experimental results)        
 
 # Conclusion:
-   - a. Significance of the work:
-        - xxx
-   - b. Innovation, performance, and workload:
-        - xxx
-   - c. Research conclusions (list points):
-        - xxx
-        - xxx
-        - xxx
-        - ...
+   - xxx (Significance of the work)        
+   - xxx (Innovation, performance, and workload)        
+   - xxx (Research conclusions (list points))        
 
 
 Please analyze the following original text and generate the response based on it:
@@ -238,10 +255,15 @@ Original text:
 {text}
 Remember to:
 - Retain proper nouns in English.
-- Methods shoould be as detailed as possible.
-- Avoid copying and pasting, and expand upon the information as needed.
+- Do not output vague statements without a specific name or value.
+- Methods shoould be as detailed as possible. 
+- Motivation needs to retain the logic of the Original text.
+- Results should be as specific as possible, keep specific nouns and values.
+- When output, never output the contents of () and () of Output Format.
 - Ensure that the response is well-structured, coherent, and addresses all sections.
-- Use a scholarly response in {lang}, maintaining proper academic language.
+- Make sure that every noun and number in your summary is already in your Original text. Then, organize the input text better.
+- Unless necessary information, please note that the output does not repeat the previous content and information.
+- Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
 """
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
