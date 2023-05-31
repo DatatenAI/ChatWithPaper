@@ -50,8 +50,15 @@ async def get_the_formatted_summary_from_pdf(
             raise Exception("No conclusion found")
         async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
             basic_info = await f.read()
-        final_res = f"{basic_info}\n\n{summary_res}"
+        # 如果不够稳定的话，可以用chat做完整的替代，这个成本应该不高，但是应该比较慢
+        # 在这里将基本信息和总结信息拼接起来：      
+        # 我们需要先将基本信息的标题单独提取出来；
+        title = basic_info.split("\n- ")[1].replace("Title: ", '')
+        
+        final_res = f"{basic_info}\n\n{summary_res}"        
         final_res = re.sub(r'\\+n', '\n', final_res)
+        
+        # 在这儿存最终的总结文本信息：
         async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
             await f.write(final_res)
         return final_res, token_cost_all
@@ -225,25 +232,32 @@ async def get_paper_summary(text, lang: str) -> tuple:
     markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
     maintaining proper academic language:
     
-You should first summarize this work in one sentence, the language should be rigorous, in the style of a popular science writer,
-including what methods were used, what problems were solved and what results were achieved. And then start summarizing the rest of the story, Output Format as follows:
-
-# Brief introduction:
-   - xxx
+Start summarizing the rest of the story, Output Format as follows:
       
 # Methods:
-   - xxx (Theoretical basis of the study)    
-   - xxx (Technical route of the article (step by step))
+   - a. Theoretical basis of the study:
+        - xxx
+   - b. Technical route of the article (step by step):
+        - xxx
+        - xxx
+        - xxx
         
 # Results:
-   - xxx (Experimental settings)        
-   - xxx (Experimental results)        
+   - a. Experimental settings:
+        - xxx
+   - Experimental results: 
+        - xxx
 
 # Conclusion:
-   - xxx (Significance of the work)        
-   - xxx (Innovation, performance, and workload)        
-   - xxx (Research conclusions (list points))        
-
+   - a. Significance of the work:
+        - xxx
+   - b. Innovation, performance, and workload:
+        - xxx
+   - c. Research conclusions (list points):
+        - xxx
+        - xxx
+        - xxx
+        - ...   
 
 Please analyze the following original text and generate the response based on it:
 Original text:
@@ -251,7 +265,7 @@ Original text:
 Remember to:
 - Retain proper nouns in English.
 - Do not output vague statements without a specific name or value.
-- Methods shoould be as detailed as possible, and introduce step by step if necessary. 
+- Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
 - Results should be as specific as possible, keep specific nouns and values.
 - When output, never output the contents of () and () of Output Format.
 - Ensure that the response is well-structured, coherent, and addresses all sections.
@@ -364,7 +378,13 @@ Organize your response using the following markdown structure:
 - Keywords: xxx
 - URLs: xxx or xxx , xxx
 
-# Background (next, you should output as {lang}!):
+(Next, you should only output as {lang} language until the end! unless necessary English items)
+# Brief introduction :
+
+- xxx (You should first summarize this work in one sentence, the language should be rigorous, in the style of a popular science writer,
+including what problems, what methods were used, were solved and what results were achieved. you should output as {lang}!)
+
+# Background:
 
 - BackGround: xxx (Whole research background, output as {lang}!).
 - Past methods: xxx (Introduce past methods and their problems, output as {lang}!)        
@@ -373,9 +393,10 @@ Organize your response using the following markdown structure:
 Remember to:
 - Ensure that the response strictly follows the provided format and does not include any additional content. 
 - Make sure your output is comprehensive and accurate!
-- Retain proper nouns in English.
+- Retain proper nouns (items, authers) in English, all other output is in {lang}.
 - Motivation needs to retain the logic of the Original text.
 - When output, never output the contents of () and () of Output Format.
+- Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
 - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
 """
     result = await chat_paper_api.ask(prompt=content,
