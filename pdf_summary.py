@@ -367,7 +367,7 @@ async def conclude_basic_information(path: str, text: str, lang: str):
         3. Indicate the first author's affiliation (with Chinese translation)
         4. Highlight the keywords of this article (in English)
         5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
-        6. You should first summarize this work in one sentence, the language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
+        6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
         7. Whole research background, output as {lang}!
         
 Organize your response using the following markdown structure:
@@ -387,8 +387,8 @@ Organize your response using the following markdown structure:
 # Background:
 
 - BackGround: xxx
-- Past methods: xxx (Introduce past methods and their problems, output as {lang}!)        
-- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper, output as {lang}!)
+- Past methods: xxx (Introduce past methods and their problems!)        
+- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)
 
 Remember to:
 - Ensure that the response strictly follows the provided format and does not include any additional content. 
