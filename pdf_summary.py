@@ -248,16 +248,6 @@ Start summarizing the rest of the story, Output Format as follows:
    - Experimental results: 
         - xxx
 
-# Conclusion:
-   - a. Significance of the work:
-        - xxx
-   - b. Innovation, performance, and workload:
-        - xxx
-   - c. Research conclusions (list points):
-        - xxx
-        - xxx
-        - xxx
-        - ...   
 
 Please analyze the following original text and generate the response based on it:
 Original text:
