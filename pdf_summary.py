@@ -248,6 +248,8 @@ Start summarizing the rest of the story, Output Format as follows:
    - Experimental results: 
         - xxx
 
+# Warning:
+- 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper.
 
 Please analyze the following original text and generate the response based on it:
 Original text:
