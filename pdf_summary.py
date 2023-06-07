@@ -232,7 +232,7 @@ async def get_paper_summary(text, lang: str) -> tuple:
     markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
     maintaining proper academic language:
     
-Start summarizing the rest of the story, Output Format as follows:
+Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
       
 # Methods:
    - a. Theoretical basis of the study:
@@ -249,7 +249,7 @@ Start summarizing the rest of the story, Output Format as follows:
         - xxx
 
 # Warning:
-- 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper.
+- 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
 
 Please analyze the following original text and generate the response based on it:
 Original text:
