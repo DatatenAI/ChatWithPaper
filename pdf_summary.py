@@ -248,7 +248,7 @@ Start summarizing the rest of the story (including Methods, Results section.), O
    - Experimental results: 
         - xxx
 
-# Warning:
+# Note:
 - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
 
 Please analyze the following original text and generate the response based on it:
