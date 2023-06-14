@@ -12,7 +12,7 @@ import optimize_openai
 from util import retry, token_str, gen_uuid
 
 
-chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo-0613",
+chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo-16k",
                                               top_p=1,
                                               temperature=0.0,
                                               apiTimeInterval=0.02)
@@ -89,9 +89,11 @@ async def get_the_complete_summary(pdf_file_path: str, lang: str) -> tuple:
         sentences = get_paper_split_res(pdf_file_path)
         if len(sentences) == 0:
             raise Exception("there is no text in the paper")
-        tasks = [process_information(sentences[0], pdf_file_path, lang=lang)]
-        result, token_cost = await asyncio.gather(*tasks)
-        token_cost_all += token_cost
+        # 当选择16K模型时，则不需要压缩：
+        # tasks = [process_information(sentences[0], pdf_file_path, lang=lang)]
+        # result, token_cost = await asyncio.gather(*tasks)
+        result = "\n".join(sentences)
+        token_cost_all += 0
     async with aiofiles.open(new_path, "r", encoding="utf-8") as f:
         result = await f.read()
     logger.info(f"end get complete summary,token_cost_all: {token_cost_all}")
@@ -127,6 +129,24 @@ def find_next_section(text):
         return match.start()
     else:
         return 0
+    
+def replace_newlines(text):
+    punctuation = ".?!"
+    uppercase_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    result = []
+    i = 0
+    
+    while i < len(text) - 1:
+        if text[i] == '\n':
+            if text[i - 1] not in punctuation and text[i + 1] not in uppercase_letters:
+                result.append(' ')
+            else:
+                result.append(text[i])
+        else:
+            result.append(text[i])
+        i += 1
+    result.append(text[-1])
+    return ''.join(result)
 
 def get_paper_split_res(
         path: str,
@@ -188,7 +208,16 @@ def get_paper_split_res(
         res.append(text[:split_str_index])
         # 把text更新成剩下的部分
         text = text[split_str_index:]  
-    return res
+        
+    # 这里将每个
+    temp_paper_split = []
+    for ps in res:
+        # print("original_text:", ps)
+        if len(ps) > 1:
+            format_text = replace_newlines(ps)
+            # print("format_text:", format_text)
+            temp_paper_split.append(format_text)
+    return temp_paper_split
 
 
 async def get_paper_final_summary(text: str,
@@ -204,9 +233,10 @@ async def get_paper_final_summary(text: str,
             raise Exception("No summary found")
 
     content = await process_text(get_paper_summary, text, language)
+    
     res = content[0]
     token_cost = content[1]
-    logger.info(f"end get paper final summary,res:{res},token_cost:{token_cost}")
+    logger.info(f"end get paper final summary,res:{res}, token_cost:{token_cost}")
     if res is not None:
         res = str(res)
         res = re.sub(r'\\+n', '\n', res)
@@ -227,44 +257,84 @@ async def get_paper_summary(text, lang: str) -> tuple:
     logger.info(f"origin text length:{len(text)}")
     text = truncate_text(text)
     logger.info(f"truncate_text length:{len(text)}")
-    content = f"""When summarizing the text, focus on providing clear and concise information. Highlight key 
-    concepts, techniques, and findings, and ensure the response is well-structured and coherent. Use the following 
-    markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
-    maintaining proper academic language:
-    
-Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
-      
-# Methods:
-   - a. Theoretical basis of the study:
-        - xxx
-   - b. Technical route of the article (step by step):
-        - xxx
-        - xxx
-        - xxx
+    print("real_lang:", lang)
+    if lang == "中文":        
+        content = f"""When summarizing the text, focus on providing clear and concise information. Highlight key 
+        concepts, techniques, and findings, and ensure the response is well-structured and coherent. Use the following 
+        markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
+        maintaining proper academic language:
         
-# Results:
-   - a. Experimental settings:
-        - xxx
-   - Experimental results: 
-        - xxx
+    Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
+        
+    # 方法:
+    - a. 理论背景:
+            - xxx
+    - b. 技术路线:
+            - xxx
+            - xxx
+            - xxx
+            
+    # 结果:
+    - a. 详细的实验设置:
+            - xxx
+    - b. 详细的实验结果: 
+            - xxx
 
-# Note:
-- 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
+    # Note:
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
 
-Please analyze the following original text and generate the response based on it:
-Original text:
-{text}
-Remember to:
-- Retain proper nouns in English.
-- Do not output vague statements without a specific name or value.
-- Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
-- Results should be as specific as possible, keep specific nouns and values.
-- When output, never output the contents of () and () of Output Format.
-- Ensure that the response is well-structured, coherent, and addresses all sections.
-- Make sure that every noun and number in your summary is already in your Original text. Then, organize the input text better.
-- Unless necessary information, please note that the output does not repeat the previous content and information.
-- Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
-"""
+    Please analyze the following original text and generate the response based on it:
+    Original text:
+    {text}
+    Remember to:
+    - Retain proper nouns in English.
+    - Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
+    - Results should be as specific as possible, keep specific nouns and values.
+    - When output, never output the contents of () and () of Output Format.
+    - Ensure that the response is well-structured, coherent, and addresses all sections.
+    - Make sure that every noun and number in your summary is already in your Original text. Then, organize the input text better.
+    - Unless necessary information, please note that the output does not repeat the previous content and information.
+    - Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
+    """
+    else:
+        content = f"""When summarizing the text, focus on providing clear and concise information. Highlight key 
+        concepts, techniques, and findings, and ensure the response is well-structured and coherent. Use the following 
+        markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
+        maintaining proper academic language:
+        
+    Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
+        
+    # Methods:
+    - a. Theoretical basis of the study:
+            - xxx
+    - b. Technical route of the article (step by step):
+            - xxx
+            - xxx
+            - xxx
+            
+    # Results:
+    - a. Experimental settings in detail:
+            - xxx
+    - Experimental results in detail: 
+            - xxx
+
+    # Note:
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
+
+    Please analyze the following original text and generate the response based on it:
+    Original text:
+    {text}
+    Remember to:
+    - Retain proper nouns in English.    
+    - Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
+    - Results should be as specific as possible, keep specific nouns and values.
+    - When output, never output the contents of () and () of Output Format.
+    - Ensure that the response is well-structured, coherent, and addresses all sections.
+    - Make sure that every noun and number in your summary is already in Original text. Then, organize the input text better.
+    - Unless necessary information, please note that the output does not repeat the previous content and information.
+    - Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
+    """
+    
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
@@ -352,45 +422,86 @@ async def conclude_basic_information(path: str, text: str, lang: str):
         + text,
         role="system",
         convo_id=convo_id)
-    content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
+    if lang == "中文":
+        content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
 
-        1. Identify the title of the paper (with Chinese translation)
-        2. List all authors' names (in English)
-        3. Indicate the first author's affiliation (with Chinese translation)
-        4. Highlight the keywords of this article (in English)
-        5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
-        6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
-        7. Whole research background, output as {lang}!
-        
-Organize your response using the following markdown structure:
+            1. Identify the title of the paper (with Chinese translation)
+            2. List all authors' names (in English)
+            3. Indicate the first author's affiliation (with Chinese translation)
+            4. Highlight the keywords of this article (in English)
+            5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
+            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
+            7. Whole research background, output as {lang}!
+            
+    Organize your response using the following markdown structure:
 
-# Basic Information:
+    # Basic Information:
 
-- Title: xxx
-- Authors: xxx
-- Affiliation: xxx
-- Keywords: xxx
-- URLs: xxx or xxx , xxx
+    - Title: xxx
+    - Authors: xxx
+    - Affiliation: xxx
+    - Keywords: xxx
+    - URLs: xxx or xxx , xxx
 
-# Brief introduction :
+    # 论文简要 :
 
-- xxx 
+    - xxx 
 
-# Background:
+    # 背景信息:
 
-- BackGround: xxx
-- Past methods: xxx (Introduce past methods and their problems!)        
-- Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)
+    - 论文背景: xxx
+    - 过去方案: xxx (Introduce past methods and their problems!)        
+    - 论文的Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)
 
-Remember to:
-- Ensure that the response strictly follows the provided format and does not include any additional content. 
-- Make sure your output is comprehensive and accurate!
-- Retain proper nouns (items, authers) in English, all other output is in {lang}.
-- Motivation needs to retain the logic of the Original text.
-- When output, never output the contents of () and () of Output Format.
-- Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
-- Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
-"""
+    Remember to:
+    - Ensure that the response strictly follows the provided format and does not include any additional content. 
+    - Make sure your output is comprehensive and accurate!
+    - Retain proper nouns (items, authers) in English, all other output is in {lang}.
+    - Motivation needs to retain the logic of the Original text.
+    - When output, never output the contents of () and () of Output Format.
+    - Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
+    - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
+    """
+    else:
+        content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
+
+            1. Identify the title of the paper (with Chinese translation)
+            2. List all authors' names (in English)
+            3. Indicate the first author's affiliation (with Chinese translation)
+            4. Highlight the keywords of this article (in English)
+            5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
+            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
+            7. Whole research background, output as {lang}!
+            
+    Organize your response using the following markdown structure:
+
+    # Basic Information:
+
+    - Title: xxx
+    - Authors: xxx
+    - Affiliation: xxx
+    - Keywords: xxx
+    - URLs: xxx or xxx , xxx
+
+    # Brief introduction :
+
+    - xxx 
+
+    # Background:
+
+    - BackGround: xxx
+    - Past methods: xxx (Introduce past methods and their problems!)        
+    - Motivation: xxx (Motivation: How does the author move from background knowledge to the research in this paper)
+
+    Remember to:
+    - Ensure that the response strictly follows the provided format and does not include any additional content. 
+    - Make sure your output is comprehensive and accurate!
+    - Retain proper nouns (items, authers) in English, all other output is in {lang}.
+    - Motivation needs to retain the logic of the Original text.
+    - When output, never output the contents of () and () of Output Format.
+    - Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
+    - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
+    """
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
