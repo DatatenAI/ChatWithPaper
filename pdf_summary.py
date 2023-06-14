@@ -12,7 +12,7 @@ import optimize_openai
 from util import retry, token_str, gen_uuid
 
 
-chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo",
+chat_paper_api = optimize_openai.ChatPaperAPI(model_name="gpt-3.5-turbo-0613",
                                               top_p=1,
                                               temperature=0.0,
                                               apiTimeInterval=0.02)
