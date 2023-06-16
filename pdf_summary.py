@@ -263,9 +263,9 @@ async def get_paper_summary(text, lang: str) -> tuple:
         markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
         maintaining proper academic language:
         
-    Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
+    Summarizing the whole Paper (including Methods, Results section.), Output Format as follows:
         
-    # 方法:
+    # Methods:
     - a. 理论背景:
             - xxx
     - b. 技术路线:
@@ -273,7 +273,7 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
             - xxx
             
-    # 结果:
+    # Results:
     - a. 详细的实验设置:
             - xxx
             - xxx
@@ -284,19 +284,23 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. Powered by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. 
+    - Powered by ChatPaper. End.
 
-    Please analyze the following original text and generate the response based on it:
+    Please summarize the following original text and generate the response based on it:
     Original text:
     {text}
     Remember to:
     - Retain proper nouns in English.
     - Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
     - Results should be as specific as possible, keep specific nouns and values.
+    - 技术路线: 请尽可能详细的介绍本文的技术路线，包括算法流程图，或者模型的结构，模型的训练方法，模型的评价指标等等。
+    - 详细的实验设置: 请尽可能详细的介绍本文实验的设置，包括实验的数据集，实验的参数设置，实验的评价指标等等。
+    - 详细的实验结果: 详细描述本文的主实验结果和其他有趣的发现，需要包括具体的数值和具体的实验结果。    
     - When output, never output the contents of () and () of Output Format.
     - Ensure that the response is well-structured, coherent, and addresses all sections.
     - Make sure that every noun and number in your summary is already in your Original text. Then, organize the input text better.
-    - The output content of each section should not be less than 200 tokens.
+    - The output content of each section should not be less than 300 tokens.
     - Unless necessary information, please note that the output does not repeat the previous content and information.
     - Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
     """
@@ -323,7 +327,8 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. Powered by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. 
+    - Powered by ChatPaper. End.
 
     Please analyze the following original text and generate the response based on it:
     Original text:
