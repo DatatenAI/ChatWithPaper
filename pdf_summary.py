@@ -36,7 +36,7 @@ async def get_the_formatted_summary_from_pdf(
         token_cost_all += token_cost
         if complete_sum_res is None:
             raise Exception("summary is None")
-        complete_sum_res = get_paper_split_res(pdf_file_path, max_token=9000)[0]
+        complete_sum_res = str(complete_sum_res)
         if len(str(complete_sum_res)) < 500:
             raise Exception("summary is None")
         summary_res, token_cost = await get_paper_final_summary(
@@ -44,7 +44,7 @@ async def get_the_formatted_summary_from_pdf(
             language=language)
         token_cost_all += token_cost
         if not isinstance(summary_res, str):
-            raise Exception("No summary found3")
+            raise Exception("No summary found")
         con_path = f"{base_path}.firstpage_conclusion.txt"
         if not os.path.isfile(con_path) or os.path.getsize(con_path) < 50:
             raise Exception("No conclusion found")
@@ -88,7 +88,10 @@ async def get_the_complete_summary(pdf_file_path: str, lang: str) -> tuple:
             first_page_path) or os.path.getsize(first_page_path) < 100:
         sentences = get_paper_split_res(pdf_file_path)
         if len(sentences) == 0:
-            raise Exception("there is no text in the paper")        
+            raise Exception("there is no text in the paper")
+        # 当选择16K模型时，则不需要压缩：
+        # tasks = [process_information(sentences[0], pdf_file_path, lang=lang)]
+        # result, token_cost = await asyncio.gather(*tasks)
         result = "\n".join(sentences)
         token_cost_all += 0
     async with aiofiles.open(new_path, "r", encoding="utf-8") as f:
@@ -100,16 +103,15 @@ async def get_the_complete_summary(pdf_file_path: str, lang: str) -> tuple:
 async def rewrite_paper_and_extract_information(path: str, lang: str) -> tuple:
     # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
-    sentences = get_paper_split_res(path, max_token=2560)
+    sentences = get_paper_split_res(path)
     if len(sentences) == 0:
         raise Exception("there is no text in the paper")
     sentences_length = len(sentences)
     logger.info(f"sentences length: {sentences_length}")
-    # tasks = [
-    #     process_sentence(sentence, sentences_length) for sentence in sentences
-    # ]
-    # tasks.append(process_information(sentences[0], path, lang=lang))
-    tasks = [process_information(sentences[0], path, lang=lang)]
+    tasks = [
+        process_sentence(sentence, sentences_length) for sentence in sentences
+    ]
+    tasks.append(process_information(sentences[0], path, lang=lang))
     results = await asyncio.gather(*tasks)
     rewrite_str = ""
     token_cost = 0
@@ -215,8 +217,6 @@ def get_paper_split_res(
             format_text = replace_newlines(ps)
             # print("format_text:", format_text)
             temp_paper_split.append(format_text)
-    temp_tokens = [token_str(ps) for ps in temp_paper_split]
-    logger.info(f"Split Tokens: {temp_tokens}")
     return temp_paper_split
 
 
@@ -230,7 +230,7 @@ async def get_paper_final_summary(text: str,
         if isinstance(res, tuple):
             return res
         else:
-            raise Exception("No summary found1")
+            raise Exception("No summary found")
 
     content = await process_text(get_paper_summary, text, language)
     
@@ -242,7 +242,7 @@ async def get_paper_final_summary(text: str,
         res = re.sub(r'\\+n', '\n', res)
         return res, token_cost
     else:
-        raise Exception("No summary found2")
+        raise Exception("No summary found")
 
 
 async def get_paper_summary(text, lang: str) -> tuple:
@@ -250,22 +250,23 @@ async def get_paper_summary(text, lang: str) -> tuple:
     convo_id = "read_paper_summary" + str(gen_uuid())
     chat_paper_api.reset(
         convo_id=convo_id,
-        system_prompt="You are a research scientist and you are skilled at summarizing academic papers using concise language."    
+        system_prompt=
+        "You are a research scientist and you are skilled at summarizing academic papers using concise language."    
     )
-    logger.info(f"input text:{text[:400]}+\n\n{text[-400:]}")
-    logger.info(f"origin text length:{token_str(text)}")
-    # text = get_paper_split_res(text, max_token=9000)[0]
-    # logger.info(f"truncate_text length:{token_str(text)}")
-    
-    if lang == "中文":
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
+    text = truncate_text(text)
+    logger.info(f"truncate_text length:{len(text)}")
+    print("real_lang:", lang)
+    if lang == "中文":        
         content = f"""When summarizing the text, focus on providing clear and concise information. Highlight key 
         concepts, techniques, and findings, and ensure the response is well-structured and coherent. Use the following 
         markdown structure, replacing the xxx placeholders with your answer, Use a scholarly response in {lang}, 
         maintaining proper academic language:
         
-    Summarizing the whole Paper (including Methods, Results section.), Output Format as follows:
+    Start summarizing the rest of the story (including Methods, Results section.), Output Format as follows:
         
-    # Methods:
+    # 方法:
     - a. 理论背景:
             - xxx
     - b. 技术路线:
@@ -273,34 +274,25 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
             - xxx
             
-    # Results:
+    # 结果:
     - a. 详细的实验设置:
-            - xxx
-            - xxx
             - xxx
     - b. 详细的实验结果: 
             - xxx
-            - xxx
-            - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. 
-    - Powered by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
 
-    Please summarize the following original text and generate the response based on it:
+    Please analyze the following original text and generate the response based on it:
     Original text:
     {text}
     Remember to:
     - Retain proper nouns in English.
     - Methods shoould be as detailed as possible, and introduce Technical route step by step if necessary. 
     - Results should be as specific as possible, keep specific nouns and values.
-    - 技术路线: 请尽可能详细的介绍本文的技术路线，包括算法流程图，或者模型的结构，模型的训练方法，模型的评价指标等等。
-    - 详细的实验设置: 请尽可能详细的介绍本文实验的设置，包括实验的数据集，实验的参数设置，实验的评价指标等等。
-    - 详细的实验结果: 详细描述本文的主实验结果和其他有趣的发现，需要包括具体的数值和具体的实验结果。    
     - When output, never output the contents of () and () of Output Format.
     - Ensure that the response is well-structured, coherent, and addresses all sections.
     - Make sure that every noun and number in your summary is already in your Original text. Then, organize the input text better.
-    - The output content of each section should not be less than 300 tokens.
     - Unless necessary information, please note that the output does not repeat the previous content and information.
     - Use a scholarly response in {lang}, maintaining proper academic language and make sure the output is easier to read.
     """
@@ -327,8 +319,7 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. 
-    - Powered by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
 
     Please analyze the following original text and generate the response based on it:
     Original text:
@@ -348,9 +339,9 @@ async def get_paper_summary(text, lang: str) -> tuple:
                                       role="user",
                                       convo_id=convo_id)
     chat_paper_api.conversation[convo_id] = None
-    # print_token("get_paper_summary", result)
+    print_token("get_paper_summary", result)
     logger.info("end get paper summary")
-    return result[0], token_str(content+result[0])
+    return result[0], result[3]
 
 async def translate_summary(text, lang: str) -> tuple:
     logger.info("start translating paper summary")
@@ -360,10 +351,10 @@ async def translate_summary(text, lang: str) -> tuple:
         system_prompt=
         "You are a research scientist and you are translated the summary with concise language and keep the same format."    
     )
-    logger.info(f"input text:{text[:100]}'\n\n'{text[-100:]}")
-    logger.info(f"origin text length:{token_str(text)}")
-    text = get_paper_split_res(text, max_token=3500)[0]
-    logger.info(f"truncate_text length:{token_str(text)}")
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
+    text = truncate_text(text)
+    logger.info(f"truncate_text length:{len(text)}")
     content = f"""Original Summary is as follows: {text}, please translate it into {lang}. 
     Remember to:
     - Retain proper nouns in original language.
@@ -376,6 +367,22 @@ async def translate_summary(text, lang: str) -> tuple:
     print_token("get_paper_summary_translation", result)
     logger.info("end get paper summary translation")
     return result[0], result[3]
+
+
+def truncate_text(text, max_token=2560, steps=None):
+    if steps is None:
+        steps = [800, 400, 200]
+    split_pos = 0
+    while split_pos < len(text):
+        for step in steps:
+            next_step = min(step, len(text) - split_pos)
+            temp_text = text[:split_pos + next_step]
+            if token_str(temp_text) <= max_token:
+                split_pos += next_step
+                break
+        else:
+            break
+    return text[:split_pos]
 
 
 async def process_information(sentence: str, path: str, lang: str):
@@ -495,11 +502,9 @@ async def conclude_basic_information(path: str, text: str, lang: str):
     - Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
     - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
     """
-    chat_paper_api.model_name = 'gpt-3.5-turbo-0613'
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
-    chat_paper_api.model_name = 'gpt-3.5-turbo-16k'
     print_token("conclude_basic_information", result)
     chat_paper_api.conversation[convo_id] = None
     res = re.sub(r'\\+n', '\n', str(result[0]))
@@ -508,7 +513,7 @@ async def conclude_basic_information(path: str, text: str, lang: str):
     async with aiofiles.open(title_path, "w", encoding="utf-8") as f:
         await f.write(res)
     logger.info(f"end conclude basic information")
-    return result[0], result[3]
+    return "", result[3]
 
 
 async def process_sentence(sentence: str, n: int):
@@ -556,14 +561,13 @@ async def get_condensed_text(
         Content.
         
     """
-    chat_paper_api.model_name = 'gpt-3.5-turbo-0613'
+    
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
-                                      convo_id=convo_id)    
+                                      convo_id=convo_id)
     chat_paper_api.conversation[convo_id] = None
     print_token(text_hash, result)
     logger.info(f"{text_hash} end get condensed text")
-    chat_paper_api.model_name = 'gpt-3.5-turbo-16k'
     return str(result[0]), result[3]
 
 
