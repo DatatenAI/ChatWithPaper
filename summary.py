@@ -8,6 +8,8 @@ import flask
 from dotenv import load_dotenv
 from loguru import logger
 
+from modules.download.donwload_pdf import download_pdf_from_url
+
 load_dotenv()
 import chat_db
 import db
@@ -140,6 +142,111 @@ async def summary(summary_id: str):
         summary_key, json.dumps(summary_res, ensure_ascii=False, indent=4))
 
 
+async def summary_subscribe(summary_id: str):
+    logger.info(f"start subscribe summary {summary_id}")
+    summary_key = f"subscribe_summary:{summary_id}"
+    # 判断是否是订阅的
+    pdf_url = await redis_manager.get(summary_key)
+    pdf_url = pdf_url.decode('utf-8')
+    pdf_hash = await download_pdf_from_url(pdf_url, os.getenv('FILE_PATH'))
+    if pdf_hash:
+        # 根改pdf hash
+        data_info = {
+            'pdf_url': pdf_url,
+            'pdf_hash': pdf_hash,  # 之后需要更改
+        }
+
+        try:
+            obj, created = db.SubscribePaperInfo.get_or_create(pdf_url=data_info['pdf_url'], defaults=data_info)
+            if created:
+                logger.info(f'paper info: {pdf_url} 数据已添加')
+            else:
+                logger.info(f'paper info: {pdf_url} 数据已存在，{pdf_hash} 进行更新')
+        except Exception as e:
+            logger.error(f"update SubscribePaperInfo pdf hash error: {e}")
+
+    # 向subscribe_paper_summary_task 表写入任务信息
+    # 订阅处理逻辑
+    # 先下载文章
+
+    # # Extract file_hash and language from summary_id
+    # file_hash, language = summary_id.split('_')
+    #
+    # # Construct PDF file path and check if it exists
+    # pdf_path = os.path.join(PDF_SAVE_DIR, f"{file_hash}.pdf")
+    # estimate_token = 20000 + util.estimate_embedding_token(pdf_path) // 10
+    # if not Path(pdf_path).is_file():
+    #     # Set the Redis response to be an error
+    #     error_res = {"status": "error", "detail": "PDF file not found"}
+    #     summary_key = f"summary_{summary_id}"
+    #     await redis_manager.redis.set(summary_key, error_res)
+    #     if util.is_cost_purchased(user, estimate_token):
+    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
+    #     else:
+    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
+    #     return
+    #
+    # # Delete any previous wrong summary results associated with the summary_id
+    # delete_wrong_summary_res(summary_id)
+    #
+    # try:
+    #     # Generate the summary from the PDF file
+    #     res, token_cost = await pdf_summary.get_the_formatted_summary_from_pdf(
+    #         pdf_path, language)
+    # except Exception as e:
+    #     logger.error(f"generate summary error:{e}", )
+    #     error_res = {"status": "error", "detail": str(e)}
+    #     summary_key = f"summary_{summary_id}"
+    #     await redis_manager.set(
+    #         summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
+    #     if util.is_cost_purchased(user, estimate_token):
+    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
+    #     else:
+    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
+    #     return
+    # # Format the summary text
+    # summary = re.sub(r'\\+n', '\n', res)
+    # # Create a dictionary containing the summary, token_cost, and pdf_hash
+    # summary_res = {
+    #     "status": "ok",
+    #     "summary": summary,
+    #     "token_cost": token_cost,
+    #     "pdf_hash": file_hash
+    # }
+    # try:
+    #     histories = chat_db.get_history(pdf_hash=file_hash, user_id=user_id)
+    #     if len(histories) == 0:
+    #         chat_db.add_history(pdf_hash=file_hash,
+    #                             user_id=user_id,
+    #                             query="summary this paper",
+    #                             content=summary,
+    #                             token_cost=token_cost,
+    #                             pages=[])
+    # except Exception as e:
+    #     logger.error(f"get chat history error:{e}")
+    #     # Set the Redis response to be an error
+    #     # turn the e to string
+    #     error_res = {"status": "error", "detail": str(e)}
+    #     summary_key = f"summary_{summary_id}"
+    #     await redis_manager.redis.set(
+    #         summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
+    #     if util.is_cost_purchased(user, estimate_token):
+    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
+    #     else:
+    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
+    #     return
+    #
+    # # Save the summary back to Redis
+    # summary_key = f"summary_{summary_id}"
+    # if util.is_cost_purchased(user, estimate_token):
+    #     await user_db.update_token_consumed_paid(user_id,
+    #                                              token_cost - estimate_token)
+    # else:
+    #     await user_db.update_token_consumed_free(user_id,
+    #                                              token_cost - estimate_token)
+    # await redis_manager.set(
+    #     summary_key, json.dumps(summary_res, ensure_ascii=False, indent=4))
+
 def handler(event_str):
     try:
         event = os.getenv("FC_CUSTOM_CONTAINER_EVENT")
@@ -149,6 +256,18 @@ def handler(event_str):
         logger.info(f"receive event: {event}")
         evt = json.loads(event)
         asyncio.run(summary(evt['summary_id']))
+    except Exception as e:
+        logger.error(e)
+
+def handler_subscribe(event_str):
+    try:
+        event = os.getenv("FC_CUSTOM_CONTAINER_EVENT")
+        logger.info(f"receive env: {event}")
+        if event is None:
+            event = event_str
+        logger.info(f"subscribe receive event: {event}")
+        evt = json.loads(event)
+        asyncio.run(summary_subscribe(evt['summary_id']))
     except Exception as e:
         logger.error(e)
 
