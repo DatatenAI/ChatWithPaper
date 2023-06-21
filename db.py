@@ -2,6 +2,10 @@ import os
 import datetime
 from peewee import *
 
+
+# from dotenv import load_dotenv
+# load_dotenv()
+
 import logging
 
 logger = logging.getLogger('peewee')
@@ -80,49 +84,72 @@ class PaperDocVector(BaseModel):
 
 
 
-class SubscribePaperInfo(BaseModelNew):
-    id = AutoField()
-    pdf_url = CharField()
-    pdf_hash = CharField()
-    year = IntegerField()
+class PaperInfo(BaseModelNew):
+    id = AutoField(primary_key=True)
+    url = CharField()   # 文章网页连接
+    pdf_url = CharField()   # pdf url
+    eprint_url = CharField()   # 预印版pdf url
+    pdf_hash = CharField()  # pdf hash
+    year = IntegerField()   # 年份
     title = CharField()
+    venue = CharField()
+    conference = CharField()
+    url_add_scib = CharField()
+    bibtex = TextField()
+    url_scholarbib = CharField()
     code = CharField()
-    doi = CharField()
-    related_doi = CharField()
+    num_citations = IntegerField()
     cited_by_url = CharField()
+    url_related_articles = CharField()  # 相关文章链接
     authors = CharField()
     abstract = TextField()
     img_url = CharField()
-    pub_time = TimeField()
-    paper_keywords = CharField()
-    create_time = TimeField()
+    pub_time = DateTimeField()
+    keywords = CharField()
+    create_time = DateTimeField(default=datetime.datetime.now)
+    doi = CharField()
 
     class Meta:
-        table_name = 'subscribe_paper_info'
+        table_name = 'paper_info'
 
-# 任务表
-class Tasks(BaseModelNew):
-    id = AutoField()
+class UserTasks(BaseModelNew):
+    id = AutoField(primary_key=True)
     user_id = CharField()
     pdf_hash = CharField()
     language = CharField()
-    type = CharField()
-    consume_points = IntegerField()
-    state = CharField(choices=('RUNNING', 'SUCCESS', 'FAIL'))
+    type = CharField(choices=('SUMMARY', 'TRANSLATE'))
+    state = CharField(choices=('WAIT', 'RUNNING', 'SUCCESS', 'FAIL'))
     created_at = DateTimeField(default=datetime.datetime.now)
-    finished_at = TimeField()
+    finished_at = DateTimeField(null=True)
+    cost_credits = IntegerField()
+    pages = IntegerField()
 
     class Meta:
         table_name = 'tasks'
 
+
+# 任务表
+class SubscribeTasks(BaseModelNew):
+    id = AutoField(primary_key=True)
+    type = CharField(choices=('SUMMARY', 'TRANSLATE'))
+    tokens = IntegerField()
+    pages = IntegerField()
+    pdf_hash = CharField()
+    language = CharField()
+    state = CharField(choices=('WAIT', 'RUNNING', 'SUCCESS', 'FAIL'))
+    created_at = DateTimeField(default=datetime.datetime.now)
+    finished_at = DateTimeField()
+    class Meta:
+        table_name = 'subscribe_tasks'
+
 # 总结表
 class Summaries(BaseModelNew):
+    id = AutoField(primary_key=True)
     basic_info = CharField()
     briefIntroduction = CharField()
     content = CharField()
-    create_time = TimeField()
+    create_time = DateTimeField()
     first_page_conclusion = CharField()
-    id = AutoField()
     language = CharField()
     medium_content = CharField()
     pdf_hash = CharField()
@@ -130,7 +157,7 @@ class Summaries(BaseModelNew):
     short_title = CharField()
     title = CharField()
     title_zh = CharField()
-    update_time = TimeField()
+    update_time = DateTimeField()
 
     class Meta:
         table_name = 'summaries'
@@ -149,14 +176,14 @@ def test():
 
     # test tasks
     # 创建任务对象
-    task = Tasks(
-        user_id='chat-paper',
-        pdf_hash='1234567890',
-        language='中文',
-        type='summary',
-        consume_points=0,
-        state='RUNNING',
-        finished_at=''
+    task = SubscribeTasks(id='1234',
+                          type='SUMMARY',
+                          tokens=0,
+                          state='RUNNING',
+                          pdf_hash='file_hash',
+                          pages=0,
+                          language='中文',
+                          created_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     )
 
     # 保存任务到数据库

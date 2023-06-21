@@ -8,7 +8,6 @@ import flask
 from dotenv import load_dotenv
 from loguru import logger
 
-from modules.download.donwload_pdf import download_pdf_from_url
 
 load_dotenv()
 import chat_db
@@ -23,14 +22,13 @@ logger.opt(exception=True)
 PDF_SAVE_DIR = os.getenv("FILE_PATH")
 
 
-def delete_wrong_summary_res(summary_id):
-    file_hash = summary_id.split('_')[0]
-    language = summary_id.split('_')[1]
+def delete_wrong_summary_res(file_hash, language, summary_temp):
     base_path = os.path.join(PDF_SAVE_DIR, file_hash)
     title_path = f"{base_path}.title.txt"
     complete_path = f"{base_path}.complete.txt"
     format_path = f"{base_path}.formated.{language}.txt"
     first_page_path = f"{base_path}.firstpage_conclusion.txt"
+
     if Path(title_path).is_file() and Path(title_path).stat().st_size < 100:
         Path(title_path).unlink()
         if Path(first_page_path).is_file():
@@ -46,206 +44,83 @@ def delete_wrong_summary_res(summary_id):
     if Path(format_path).is_file() and Path(format_path).stat().st_size < 1500:
         Path(format_path).unlink()
 
+from pydantic import BaseModel
+class SummaryData(BaseModel):
+    user_type: str
+    pdf_hash: str
+    language: str
+    summary_temp: str
 
-async def summary(summary_id: str):
-    logger.info(f"start summary {summary_id}")
-    user_id = await redis_manager.redis.get(summary_id)
-    logger.info(f"user id {user_id}")
-    if user_id is None:
-        logger.error(f"redis summary_id {summary_id}  is none")
-        return
-    user_id = user_id.decode('utf-8')
-    logger.info(f"process summary:{summary_id},user_id:{user_id}")
-    user = db.User.get(db.User.user_id == user_id)
-    if not user:
-        error_res = {"status": "error", "detail": "Login required"}
-        summary_key = f"summary_{summary_id}"
-        await redis_manager.redis.set(summary_key, error_res)
-        return
+class TranslateDate(BaseModel):
+    user_type: str
+    pdf_hash: str
+    language: str
+    translate_temp: str
 
-    # Extract file_hash and language from summary_id
-    file_hash, language = summary_id.split('_')
+# async def summary(summary_id: str):
+async def summary(summary_data:SummaryData):
+    user_type = summary_data.user_type
+    file_hash = summary_data.pdf_hash
+    language = summary_data.language
+    summary_temp = summary_data.summary_temp
 
-    # Construct PDF file path and check if it exists
+    logger.info(f"start user: {user_type},  summary {file_hash}")
     pdf_path = os.path.join(PDF_SAVE_DIR, f"{file_hash}.pdf")
-    estimate_token = 20000 + util.estimate_embedding_token(pdf_path) // 10
     if not Path(pdf_path).is_file():
-        # Set the Redis response to be an error
-        error_res = {"status": "error", "detail": "PDF file not found"}
-        summary_key = f"summary_{summary_id}"
-        await redis_manager.redis.set(summary_key, error_res)
-        if util.is_cost_purchased(user, estimate_token):
-            await user_db.update_token_consumed_paid(user_id, -estimate_token)
-        else:
-            await user_db.update_token_consumed_free(user_id, -estimate_token)
-        return
-
-    # Delete any previous wrong summary results associated with the summary_id
-    delete_wrong_summary_res(summary_id)
+        logger.error(f'file {file_hash}.pdf  not found')
+        return None
 
     try:
         # Generate the summary from the PDF file
-        res, token_cost = await pdf_summary.get_the_formatted_summary_from_pdf(
-            pdf_path, language)
+        title, title_zh, basic_info, brief_intro, summary_res, token_cost_all = await pdf_summary.get_the_formatted_summary_from_pdf(
+            pdf_path, language, summary_temp=summary_temp)
+
+        return title, title_zh, basic_info, brief_intro, summary_res, token_cost_all
     except Exception as e:
         logger.error(f"generate summary error:{e}", )
         error_res = {"status": "error", "detail": str(e)}
-        summary_key = f"summary_{summary_id}"
-        await redis_manager.set(
-            summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
-        if util.is_cost_purchased(user, estimate_token):
-            await user_db.update_token_consumed_paid(user_id, -estimate_token)
-        else:
-            await user_db.update_token_consumed_free(user_id, -estimate_token)
+        json.dumps(error_res, ensure_ascii=False, indent=4)     # 返回错误信息
+        # Delete any previous wrong summary results associated with the summary_id
+        delete_wrong_summary_res(summary_id)
+
+
+async def process_summary(task_data):
+    """
+    summary的处理逻辑
+    """
+    pdf_hash = task_data['pdf_hash']
+    user_type = task_data['user_type']
+    # 总结逻辑
+    user_id = task_data['user_id']
+
+
+    logger.info(f"user id {user_id}")
+    summary_data = SummaryData(
+        user_type=task_data['user_type'],
+        pdf_hash=task_data['pdf_hash'],
+        language=task_data['language'],
+        summary_temp=task_data['temp']
+    )
+    res = await summary(summary_data=summary_data)
+    # 扣费和写表逻辑
+    if user_type == 'spider':
+        pass
+    elif user_type == 'user':
+        if res:
+            points = task_data['pages']
+            if util.is_cost_purchased(user, estimate_token):
+                await user_db.update_token_consumed_paid(user_id, points)
         return
-    # Format the summary text
-    summary = re.sub(r'\\+n', '\n', res)
-    # Create a dictionary containing the summary, token_cost, and pdf_hash
-    summary_res = {
-        "status": "ok",
-        "summary": summary,
-        "token_cost": token_cost,
-        "pdf_hash": file_hash
-    }
-    try:
-        histories = chat_db.get_history(pdf_hash=file_hash, user_id=user_id)
-        if len(histories) == 0:
-            chat_db.add_history(pdf_hash=file_hash,
-                                user_id=user_id,
-                                query="summary this paper",
-                                content=summary,
-                                token_cost=token_cost,
-                                pages=[])
-    except Exception as e:
-        logger.error(f"get chat history error:{e}")
-        # Set the Redis response to be an error
-        # turn the e to string
-        error_res = {"status": "error", "detail": str(e)}
-        summary_key = f"summary_{summary_id}"
-        await redis_manager.redis.set(
-            summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
-        if util.is_cost_purchased(user, estimate_token):
-            await user_db.update_token_consumed_paid(user_id, -estimate_token)
-        else:
-            await user_db.update_token_consumed_free(user_id, -estimate_token)
-        return
-
-    # Save the summary back to Redis
-    summary_key = f"summary_{summary_id}"
-    if util.is_cost_purchased(user, estimate_token):
-        await user_db.update_token_consumed_paid(user_id,
-                                                 token_cost - estimate_token)
-    else:
-        await user_db.update_token_consumed_free(user_id,
-                                                 token_cost - estimate_token)
-    await redis_manager.set(
-        summary_key, json.dumps(summary_res, ensure_ascii=False, indent=4))
+        pass
 
 
-async def summary_subscribe(summary_id: str):
-    logger.info(f"start subscribe summary {summary_id}")
-    summary_key = f"subscribe_summary:{summary_id}"
-    # 判断是否是订阅的
-    pdf_url = await redis_manager.get(summary_key)
-    pdf_url = pdf_url.decode('utf-8')
-    pdf_hash = await download_pdf_from_url(pdf_url, os.getenv('FILE_PATH'))
-    if pdf_hash:
-        # 根改pdf hash
-        data_info = {
-            'pdf_url': pdf_url,
-            'pdf_hash': pdf_hash,  # 之后需要更改
-        }
+    # "user_type": user_type,
+    # "task_id": task_id,
+    # "task_type": task.type,
+    # "language": task.language,
+    # "pdf_hash": task.pdf_hash
 
-        try:
-            obj, created = db.SubscribePaperInfo.get_or_create(pdf_url=data_info['pdf_url'], defaults=data_info)
-            if created:
-                logger.info(f'paper info: {pdf_url} 数据已添加')
-            else:
-                logger.info(f'paper info: {pdf_url} 数据已存在，{pdf_hash} 进行更新')
-        except Exception as e:
-            logger.error(f"update SubscribePaperInfo pdf hash error: {e}")
-
-    # 向subscribe_paper_summary_task 表写入任务信息
-    # 订阅处理逻辑
-    # 先下载文章
-
-    # # Extract file_hash and language from summary_id
-    # file_hash, language = summary_id.split('_')
-    #
-    # # Construct PDF file path and check if it exists
-    # pdf_path = os.path.join(PDF_SAVE_DIR, f"{file_hash}.pdf")
-    # estimate_token = 20000 + util.estimate_embedding_token(pdf_path) // 10
-    # if not Path(pdf_path).is_file():
-    #     # Set the Redis response to be an error
-    #     error_res = {"status": "error", "detail": "PDF file not found"}
-    #     summary_key = f"summary_{summary_id}"
-    #     await redis_manager.redis.set(summary_key, error_res)
-    #     if util.is_cost_purchased(user, estimate_token):
-    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
-    #     else:
-    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
-    #     return
-    #
-    # # Delete any previous wrong summary results associated with the summary_id
-    # delete_wrong_summary_res(summary_id)
-    #
-    # try:
-    #     # Generate the summary from the PDF file
-    #     res, token_cost = await pdf_summary.get_the_formatted_summary_from_pdf(
-    #         pdf_path, language)
-    # except Exception as e:
-    #     logger.error(f"generate summary error:{e}", )
-    #     error_res = {"status": "error", "detail": str(e)}
-    #     summary_key = f"summary_{summary_id}"
-    #     await redis_manager.set(
-    #         summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
-    #     if util.is_cost_purchased(user, estimate_token):
-    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
-    #     else:
-    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
-    #     return
-    # # Format the summary text
-    # summary = re.sub(r'\\+n', '\n', res)
-    # # Create a dictionary containing the summary, token_cost, and pdf_hash
-    # summary_res = {
-    #     "status": "ok",
-    #     "summary": summary,
-    #     "token_cost": token_cost,
-    #     "pdf_hash": file_hash
-    # }
-    # try:
-    #     histories = chat_db.get_history(pdf_hash=file_hash, user_id=user_id)
-    #     if len(histories) == 0:
-    #         chat_db.add_history(pdf_hash=file_hash,
-    #                             user_id=user_id,
-    #                             query="summary this paper",
-    #                             content=summary,
-    #                             token_cost=token_cost,
-    #                             pages=[])
-    # except Exception as e:
-    #     logger.error(f"get chat history error:{e}")
-    #     # Set the Redis response to be an error
-    #     # turn the e to string
-    #     error_res = {"status": "error", "detail": str(e)}
-    #     summary_key = f"summary_{summary_id}"
-    #     await redis_manager.redis.set(
-    #         summary_key, json.dumps(error_res, ensure_ascii=False, indent=4))
-    #     if util.is_cost_purchased(user, estimate_token):
-    #         await user_db.update_token_consumed_paid(user_id, -estimate_token)
-    #     else:
-    #         await user_db.update_token_consumed_free(user_id, -estimate_token)
-    #     return
-    #
-    # # Save the summary back to Redis
-    # summary_key = f"summary_{summary_id}"
-    # if util.is_cost_purchased(user, estimate_token):
-    #     await user_db.update_token_consumed_paid(user_id,
-    #                                              token_cost - estimate_token)
-    # else:
-    #     await user_db.update_token_consumed_free(user_id,
-    #                                              token_cost - estimate_token)
-    # await redis_manager.set(
-    #     summary_key, json.dumps(summary_res, ensure_ascii=False, indent=4))
+    return None
 
 def handler(event_str):
     try:
@@ -254,20 +129,34 @@ def handler(event_str):
         if event is None:
             event = event_str
         logger.info(f"receive event: {event}")
-        evt = json.loads(event)
-        asyncio.run(summary(evt['summary_id']))
+        task_data = json.loads(event)
+        asyncio.run(process_summary(task_data))
     except Exception as e:
-        logger.error(e)
+        logger.error(f"handler error: {e}")
 
-def handler_subscribe(event_str):
-    try:
-        event = os.getenv("FC_CUSTOM_CONTAINER_EVENT")
-        logger.info(f"receive env: {event}")
-        if event is None:
-            event = event_str
-        logger.info(f"subscribe receive event: {event}")
-        evt = json.loads(event)
-        asyncio.run(summary_subscribe(evt['summary_id']))
-    except Exception as e:
-        logger.error(e)
 
+
+async def testUserTask():
+    pass
+async def testSubTask():
+    task_id = '4'
+    user_type = 'spider'
+
+    task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)
+    if task.type.lower() == 'summary':  # 总结的任务
+        logger.info("begin spider summary")
+        dumps = json.dumps({
+            "user_type": user_type,
+            "task_id": task_id,
+            "user_id": 'chat-paper',    # 添加用户id
+            "task_type": task.type,
+            "language": task.language,
+            "pages": task.pages,
+            "pdf_hash": task.pdf_hash,
+            "temp": 'default'
+        }, ensure_ascii=False)
+        task_data = json.loads(dumps)
+        await process_summary(task_data)
+
+if __name__ == '__main__':
+    asyncio.run(testSubTask())

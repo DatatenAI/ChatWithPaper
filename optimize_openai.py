@@ -8,6 +8,7 @@ import api_key_db
 import util
 
 
+
 class ChatPaperAPI:
     """
     Official ChatGPT API
