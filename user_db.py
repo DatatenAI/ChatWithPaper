@@ -42,7 +42,12 @@ async def update_token_consumed_free(user_id: str,
                 f"token free consumption exceeded, user_id:{user_id}, tokens_consumed:{user.token_consumed}, "
                 f"token_increase:{token_consumed_increase}")
             raise Exception("Token consumption exceeded")
-        db.User.update(token_consumed=db.User.token_consumed + token_consumed_increase).where(db.User.user_id == user_id).execute()
+        if user.token_consumed + token_consumed_increase < 0:
+           db.User.update(token_consumed=FREE_TOKEN).where(
+                db.User.user_id == user_id).execute()
+        else:
+           db.User.update(token_consumed=db.User.token_consumed + token_consumed_increase).where(
+                db.User.user_id == user_id).execute()
         logger.info(f"user_id:{user_id}, take free {token_consumed_increase} tokens")
     finally:
         await redis_manager.release_lock(lock_name, lock)
