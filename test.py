@@ -1,4 +1,10 @@
 import os
+from dotenv import load_dotenv
+from loguru import logger
+load_dotenv()
+
+from summary import delete_wrong_summary_res
+
 basic_info="""
 # Basic Information:
 
@@ -15,3 +21,12 @@ print(res)
 
 print(len("Introduction of an exclusive, highly linear, and matrix-effectless analytical method based on dispersive micro solid phase extraction using MIL-88B(Fe) followed by dispersive liquid–liquid microextraction specialized for the analysis of pesticides in celery and tomato juices without dilution"))
 # print(os.path.getsize('../uploads/3047b38215263278f07178419489a887.pdf')/1024,'KB')
+
+
+
+file_hash = '3047b38215263278f07178419489a887'
+language = '中文'
+summary_temp = 'default'
+
+
+delete_wrong_summary_res(file_hash, language, summary_temp)

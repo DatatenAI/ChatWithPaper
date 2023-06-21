@@ -31,7 +31,7 @@ async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
     将brief introduction 提取出来
     """
     logger.info("start translating paper summary")
-    convo_id = "read_paper_summary" + str(gen_uuid())
+    convo_id = "read_paper_brief_intro:" + str(gen_uuid())
     chat_paper_api.reset(
         convo_id=convo_id,
         system_prompt=
@@ -39,7 +39,9 @@ async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
     )
     logger.info(f"input title:{text}")
     logger.info(f"origin title length:{len(text)}")
-    content = f"""Original Paper summary is as follows: {text}, please extract brief introduction it into {language}. 
+    content = f"""Original Paper summary is as follows: 
+    {text}
+    please extract brief introduction it into {language}. 
     Remember to:
     - Retain proper nouns in original language.
     - Retain authors in original language.
@@ -64,12 +66,12 @@ def truncate_title(title:str):
         truncated_title = title[:180] + '...'
         return truncated_title
 
-async def From_BasicInfo_Extract_title(text: str, lang: str) -> tuple:
+async def From_BasicInfo_Extract_title(text: str, language: str) -> tuple:
     """
     将title翻译为中文
     """
     logger.info("start translating paper summary")
-    convo_id = "translate_paper_title" + str(gen_uuid())
+    convo_id = "translate_paper_title:" + str(gen_uuid())
     chat_paper_api.reset(
         convo_id=convo_id,
         system_prompt=
@@ -77,7 +79,7 @@ async def From_BasicInfo_Extract_title(text: str, lang: str) -> tuple:
     )
     logger.info(f"input title:{text}")
     logger.info(f"origin title length:{len(text)}")
-    content = f"""Original Paper basic info is as follows: {text}, please extracted the title in {lang}. 
+    content = f"""Original Paper basic info is as follows: {text}, please extracted the title in {language}. 
     Remember to:
     - Retain proper nouns in original language.
     - Retain authors in original language.
@@ -92,27 +94,61 @@ async def From_BasicInfo_Extract_title(text: str, lang: str) -> tuple:
     return truncate_title(result[0]), result[3]
 
 async def get_title_brief_info(basic_info:str, final_res:str, language:str='中文')->tuple:
+    """
+    提取 title, brief info
+    """
     logger.info("start get paper final basic info")
     # 尝试处理三次
     async def process_text(func: Callable[[str, str], object], text: str,
                            language: str) -> tuple:
-        res = await retry(3, func, text=text, lang=language)
+        res = await retry(3, func, text=text, language=language)
         if isinstance(res, tuple):
             return res
         else:
             raise Exception("No summary found")
 
-    token_cost = 0
-    res_title_zh = await process_text(From_BasicInfo_Extract_title, basic_info, "中文")
-    title_zh = res_title_zh[0]
-    token_cost = token_cost + res_title_zh[1]
-    res_title = await process_text(From_BasicInfo_Extract_title, basic_info, "English")
-    title = res_title[0]
-    token_cost = token_cost + res_title[1]
+    # 定义并发执行的协程函数
+    async def process_title_zh():
+        res_title_zh = await process_text(From_BasicInfo_Extract_title, basic_info, "中文")
+        title_zh = res_title_zh[0]
+        token_cost = res_title_zh[1]
+        return title_zh, token_cost
 
-    content = await process_text(get_paper_summary, final_res, language)
-    brief_intro = content[0]
-    token_cost = token_cost + content[1]
+    async def process_title():
+        res_title = await process_text(From_BasicInfo_Extract_title, basic_info, "English")
+        title = res_title[0]
+        token_cost = res_title[1]
+        return title, token_cost
+
+    async def process_brief_intro():
+        content = await process_text(Extract_Brief_Introduction, final_res, language)
+        brief_intro = content[0]
+        token_cost = content[1]
+        return brief_intro, token_cost
+
+    # 并行执行协程任务
+    title_zh_task = process_title_zh()
+    title_task = process_title()
+    brief_intro_task = process_brief_intro()
+    # 使用 asyncio.gather() 并行运行协程任务
+    results = await asyncio.gather(title_zh_task, title_task, brief_intro_task)
+    # 提取各任务的结果
+    title_zh, token_cost_title_zh = results[0]
+    title, token_cost_title = results[1]
+    brief_intro, token_cost_intro = results[2]
+    # 计算总的 token_cost
+    token_cost = token_cost_title_zh + token_cost_title + token_cost_intro
+
+    # res_title_zh = await process_text(From_BasicInfo_Extract_title, basic_info, "中文")
+    # title_zh = res_title_zh[0]
+    # token_cost = token_cost + res_title_zh[1]
+    # res_title = await process_text(From_BasicInfo_Extract_title, basic_info, "English")
+    # title = res_title[0]
+    # token_cost = token_cost + res_title[1]
+    #
+    # content = await process_text(Extract_Brief_Introduction, final_res, language)
+    # brief_intro = content[0]
+    # token_cost = token_cost + content[1]
 
     logger.info(f"end get paper title brief , title_zh:{title_zh}, title:{title}, brief intro:{brief_intro}, token_cost:{token_cost}")
     if title and title_zh and brief_intro:
@@ -134,7 +170,7 @@ async def get_the_formatted_summary_from_pdf(
         logger.info(f"{new_path} formatted txt not exists")
         try:
             complete_sum_res, token_cost = await get_the_complete_summary(
-                pdf_file_path, language=language, summary_temp=summary_temp)
+                pdf_file_path, language=language, summary_temp=summary_temp)    # 信息压缩
         except Exception as e:
             logger.error(f"get the complete summary error: {e}")
             raise Exception(str(e))
@@ -154,6 +190,7 @@ async def get_the_formatted_summary_from_pdf(
         if not isinstance(summary_res, str):
             raise Exception("No summary found")
         con_path = f"{base_path}.firstpage_conclusion.txt"
+
         if not os.path.isfile(con_path) or os.path.getsize(con_path) < 50:
             raise Exception("No conclusion found")
         async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
@@ -170,11 +207,14 @@ async def get_the_formatted_summary_from_pdf(
         final_res = re.sub(r'\\+n', '\n', final_res)
 
         # 在这儿存最终的总结文本信息：
+        # TODO 分开存信息
+
         async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
             await f.write(final_res)
         return title, title_zh, basic_info, brief_intro, summary_res, token_cost_all
 
     else:
+        # TODO 改语言
         logger.info(f"{new_path} formatted txt exists")
         con_path = f"{base_path}.firstpage_conclusion.txt"
         if not os.path.isfile(con_path) or os.path.getsize(con_path) < 50:
@@ -190,20 +230,19 @@ async def get_the_formatted_summary_from_pdf(
 async def get_the_complete_summary(pdf_file_path: str, language: str, summary_temp: str = 'default') -> tuple:
     logger.info("start get complete summary")
     base_path, ext = os.path.splitext(pdf_file_path)
-    new_path = f"{base_path}.complete.txt"
+    new_path = f"{base_path}.complete.txt"      # 完整的文本内容
     first_page_path = f"{base_path}.firstpage_conclusion.txt"
     result = None
     token_cost_all = 0
     # 开始处理长文本内容。
-    if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:    # 如果存在並且小于 1000 字节
-        result, token = await rewrite_paper_and_extract_information(
+    if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:    # 如果不存在或者小于 1000 字节
+        result, first_page_info, token = await rewrite_paper_and_extract_information(
             pdf_file_path, language=language)
         token_cost_all += token
         async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
             await f.write(result)
-    elif not os.path.isfile(
-            first_page_path) or os.path.getsize(first_page_path) < 100:
-        sentences = get_paper_split_res(pdf_file_path)
+    elif not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 100:
+        sentences = get_paper_split_res(pdf_file_path)      # 将paper内容拆分
         if len(sentences) == 0:
             raise Exception("there is no text in the paper")
         # 当选择16K模型时，则不需要压缩：
@@ -225,19 +264,24 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
         raise Exception("there is no text in the paper")
     sentences_length = len(sentences)
     logger.info(f"sentences length: {sentences_length}")
-    tasks = [
-        process_sentence(sentence, sentences_length) for sentence in sentences
-    ]
-    tasks.append(process_information(sentences[0], path, language=language))
-    results = await asyncio.gather(*tasks)
+    # tasks = [
+    #     process_sentence(sentence, sentences_length) for sentence in sentences
+    # ]
+    # tasks.append(process_information(sentences[0], path, language=language))
+    #
+    # results = await asyncio.gather(*tasks)
+    sentence_tasks = [process_sentence(sentence, sentences_length) for sentence in sentences]
+    results = await asyncio.gather(*sentence_tasks)
+    informations = await process_information(sentences[0], path, language=language)
     rewrite_str = ""
     token_cost = 0
     for result in results:
         if isinstance(result, tuple):
             rewrite_str += result[0]
             token_cost += result[1]
+    token_cost += informations[1]
     logger.info("end rewrite paper and extract")
-    return rewrite_str, token_cost
+    return rewrite_str, informations[0], token_cost
 
 
 def find_next_section(text):
@@ -514,6 +558,9 @@ def truncate_text(text, max_token=2560, steps=None):
 
 
 async def process_information(sentence: str, path: str, language: str):
+    """
+    处理基本信息
+    """
     try:
         result = await retry(
             3,
@@ -528,37 +575,48 @@ async def process_information(sentence: str, path: str, language: str):
         return e
 
 
-async def conclude_basic_information(path: str, text: str, language: str):
+async def conclude_basic_information(path: str, text: str, language: str) -> tuple:
+    """
+    总结 title, 第一页的结论
+    """
     logger.info(f"start conclude basic information,path:{path}")
     base_path, ext = os.path.splitext(path)
     con_path = f"{base_path}.firstpage_conclusion.txt"
-    title_path = f"{base_path}.title.txt"
+    # title_path = f"{base_path}.title.txt"
     if os.path.isfile(con_path) and os.path.getsize(con_path) > 50:
         async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
             text = await f.read()
             text = re.sub(r'\\+n', '\n', text)
-            return "", 0
-    convo_id = "read_paper_title" + str(gen_uuid())
+            return text, 0
+
+    convo_id = "read_paper_title:" + str(gen_uuid())
     chat_paper_api.reset(
         convo_id=convo_id,
         system_prompt=
         "You are a research scientist and you are skilled at summarizing academic papers using concise language."
     )
-    chat_paper_api.add_to_conversation(
-        message=
-        "This is the first page of a research paper, and I need your help to read and summarize some questions: "
-        + text,
-        role="system",
-        convo_id=convo_id)
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
+
+    # chat_paper_api.add_to_conversation(
+    #     message=
+    #     "This is the first page of a research paper, and I need your help to read and summarize some questions: "
+    #     + text,
+    #     role="system",
+    #     convo_id=convo_id)
     if language == "中文":
-        content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
+        content = f"""
+        This is the first page of a research paper, and I need your help to read and summarize some questions.
+        Original text:
+        {text}
+        Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
 
             1. Identify the title of the paper (with Chinese translation)
             2. List all authors' names (in English)
             3. Indicate the first author's affiliation (with Chinese translation)
             4. Highlight the keywords of this article (in English)
             5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
-            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
+            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {language}!)
             7. Whole research background, output as {language}!
             
     Organize your response using the following markdown structure:
@@ -591,14 +649,17 @@ async def conclude_basic_information(path: str, text: str, language: str):
     - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
     """
     else:
-        content = f"""Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
-
+        content = f"""
+        This is the first page of a research paper, and I need your help to read and summarize some questions.
+        Original text:
+        {text}
+        Please provide a concise and academic response. Avoid copying and pasting the abstract; instead, expand upon it as needed. Help me complete the following tasks:
             1. Identify the title of the paper (with Chinese translation)
             2. List all authors' names (in English)
             3. Indicate the first author's affiliation (with Chinese translation)
             4. Highlight the keywords of this article (in English)
             5. Provide links to the paper and GitHub code (if available; if not, use "GitHub: None")
-            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {lang}!)
+            6. You should first summarize this work in "one" sentence! The language should be rigorous, in the style of a popular science writer, including what problems, what methods were used, were solved and what results were achieved. (you should output as {language}!)
             7. Whole research background, output as {language}!
             
     Organize your response using the following markdown structure:
@@ -630,6 +691,7 @@ async def conclude_basic_information(path: str, text: str, language: str):
     - Avoid copying and pasting! Unless necessary information, please note that the new output content does not repeat the previous output content and information.
     - Replace the xxx placeholders with the corresponding information, and maintain line breaks as shown.
     """
+
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
@@ -638,13 +700,15 @@ async def conclude_basic_information(path: str, text: str, language: str):
     res = re.sub(r'\\+n', '\n', str(result[0]))
     async with aiofiles.open(con_path, "w", encoding="utf-8") as f:
         await f.write(res)
-    async with aiofiles.open(title_path, "w", encoding="utf-8") as f:
-        await f.write(res)
+        logger.info(f"write {con_path}")
     logger.info(f"end conclude basic information")
-    return "", result[3]
+    return res, result[3]
 
 
 async def process_sentence(sentence: str, n: int):
+    """
+    压缩信息，拆分成n份
+    """
     try:
         result = await retry(3,
                              get_condensed_text,
@@ -808,6 +872,7 @@ async def test_get_title_brief_info():
 - Keywords: speech separation, deep learning, Conv-TasNet, time-domain, end-to-end
 - URLs: Paper: https://ieeexplore.ieee.org/document/8462045, GitHub: https://github.com/JusperLee/Conv-TasNet-pytorch
     """
+
     summ = """
     # Basic Information:
 
@@ -878,13 +943,98 @@ async def test_get_the_formatted_summary_from_pdf():
     res = await get_the_formatted_summary_from_pdf(pdf_path, language, summary_temp=summary_temp)
     print(res)
 
+async def test_conclude_basic_information():
+    text = """
+    FAIR: A Causal Framework for Accurately
+Inferring Judgments Reversals
+Minghua He1(�), Nanfei Gu2, Yuntao Shi1, Qionghui Zhang3, and Yaying
+Chen1(�) 1 College of Computer Science and Technology, Jilin University, Changchun, China 2 School of Law, Jilin University, Changchun, China 3 Gould School of Law, University of Southern California, Los Angeles, USA
+Abstract. Artificial intelligence researchers have made significant ad- vances in legal intelligence in recent years. However, the existing studies have not focused on the important value embedded in judgments rever- sals, which limits the improvement of the efficiency of legal intelligence.
+In this paper, we propose a causal Framework for Accurately Inferring case Reversals (FAIR), which models the problem of judgments rever- sals based on real Chinese judgments. We mine the causes of judgments reversals by causal inference methods and inject the obtained causal re- lationships into the neural network as a priori knowledge. And then, our framework is validated on a challenging dataset as a legal judgment pre- diction task. The experimental results show that our framework can tap the most critical factors in judgments reversal, and the obtained causal relationships can effectively improve the neural network’s performance.
+In addition, we discuss the generalization ability of large language models for legal intelligence tasks using ChatGPT as an example. Our experi- ment has found that the generalization ability of large language models still has defects, and mining causal relationships can effectively improve the accuracy and explain ability of model predictions.
+Keywords: Legal Intelligence · Causal Inference · Language Processing.
+1
+Introduction
+Legal intelligence is dedicated to assist legal tasks through the application of ar- tificial intelligence. Data resources in the legal field are mainly presented in the form of textual documents, and China has the world’s largest database of judg- ment documents, which can be further explored for its significant value through natural language processing(NLP). In recent years, with the increase of comput- ing power and data scale, deep learning algorithms have developed rapidly and gradually become the mainstream technology of legal intelligence. ChatGPT is a typical large language model(LLM) that has triggered intense discussions, and its generalization ability in the legal field also needs to be studied.
+First Author and Second Author contribute equally to this work.
+arXiv:2306.11585v1  [cs.CL]  20 Jun 2023 2
+M. He et al.
+Artificial intelligence researchers have put forth many fruitful efforts in ad- vancing the use of deep learning in legal intelligence. Several works in recent years have contributed very rich legal data resources to the natural language processing community [1,3,21], and these datasets together form the basis of legal intelligence research. Based on these datasets, researchers have designed diverse legal AI tasks based on the practical needs of the legal domain, among which representative tasks include legal judgment prediction (LJP) [17], legal case matching [23], legal entity extraction [3], etc. Based on natural language processing techniques, researchers have developed corresponding solutions for these tasks and applied them in judicial practice.
+However, the established work neglects the issue of judgments reversals, which is the area most closely linked to the application of law. According to our statistics, the percentage of revision of judgments reaches 14.63% of all judgments in China, which is a non-negligible part. The problem of judgments reversals is directly related to the direction of application of AI techniques and the effect of models. In the LJP task, extracting the causal relationship in judg- ments reversals as a priori knowledge helps to improve the accuracy as well as interpretability of model prediction.
+Although the problem of judgments reversals has important theoretical and practical value, there are major challenges in the research. 1) It is more difficult to model the actual situation of reversals of judgments with high quality. The dif- ficulty of this part of the work is that it is difficult to uncover all the factors that influence the judgment, and it is difficult to quantify and analyze factors such as judges’ subjective will. 2) It is difficult to directly apply the prior knowledge to the improvement of neural networks. How to make neural networks efficiently use prior knowledge from different domains has been one of the challenges of research in artificial intelligence.
+In this paper, we propose a causal Framework for Accurately Inferring judg- ments Reversals (FAIR), which mines why revisions occur based on causal infer- ence, which is the process of exploring how one variable T affects another vari- able Y . In the construction of FAIR, first, the causal graph is initially modeled with the help of legal experts by training an encoder to remove the redundant constraints in the graph. Then, the causal effects between different variables are estimated quantitatively using a causal inference algorithm. Finally, the obtained causal knowledge is injected into the neural network model of the downstream task, which can effectively improve the performance of the model.
+While the recent rise of Large Language Models (LLMs) has had a huge im- pact on the natural language processing community, we are also interested in the generalization ability of LLMs on legal intelligence tasks. We designed chal- lenging experiments to explore the knowledge exploitation ability and reasoning power of LLMs in the legal domain, and added LLMs as comparisons in the evaluation experiments of the FAIR framework. The experiments reveal some current limitations of LLM and demonstrate that the generalization ability of
+LLM can be enhanced by causal knowledge mining and injection.
+FAIR 3
+Our main contributions are as follows: 1) We propose FAIR, a causal Frame- work for Accurately Inferring judgments Reversals, and better mine the causal relationships in complex legal judgments based on causal inference to uncover the reasons for judgments reversals. 2)The results obtained from performing the
+LJP task on a real legal dataset indicate that it is effective to improve the per- formance of neural networks by injecting prior knowledge. 3) We explore the knowledge utilization capability and inference capability of LLM in the legal do- main. By comparing our framework with LLM, we revealed some limitations of
+LLM currently existing and proposed ways to improve its generalization ability.
+2
+Related Work 2.1
+Legal Intelligence
+Legal Intelligence focuses on applying natural language processing techniques to the legal domain, for which researchers have designed diverse tasks and provided rich data resources. CAIL2018 [21] is a large-scale Chinese legal dataset designed for the LJP task, focusing on LJP in the criminal law domain. LEVEN [22] considers the legal event detection task. FSCS [13] provides multilingual data for the LJP task and studies the legal differences in different regions. LeSICiN [14] designed the law and regulation identification task, using graphs to model the citation network between case documents and legal texts. MSJudge [11] describes a courtroom argument scenario with multi-actor dialogues for the LJP task.
+Some work has attempted to provide solutions to the above tasks using natural language processing techniques, and Lawformer [20] has designed a pre-training model for legal text training. EPM [6] considers implicit constraints between events in the LJP task. NSCL [7] attempts to use contrast learning to capture the subtle differences between legal texts in the LJP task. QAjudge [24] uses reinforcement learning to provide interpretable predictions for LJP. However, these works have not taken into account the issue of judgments reversals, which is directly related to the application of the law.
+2.2
+Causal Inference for Legal Domain
+Recent work has attempted to use causal inference to provide more reliable ex- planations and greater robustness for legal intelligence. Liepina [9] introduces a semi-formal causal inference framework to model factual causality arguments in legal cases. Chockler [4] investigates the problem of legal attribution of respon- sibility using causal inference to capture complex causal relationships between multiple parties and events. GCI [10] designs a causal inference framework for unlabeled legal texts, using a graph-based approach to construct causal graphs from factual descriptions. Evan [8] uses causal inference to provide explanations for binary algorithms in legal practice. Law-Match [18] considers the influence of legal provisions in legal case-matching tasks and incorporates them as instru- mental variables in causal graphs. Chen et al [2] investigated the problem of pseudo-correlation error introduced by pre-trained models and eliminated this error by learning the underlying causal knowledge in legal texts.
+4
+M. He et al.
+3
+Methodology
+Our framework FAIR consists of three main parts, including causal graph mod- eling, estimating causal effects on the modeled causal graph, and injecting causal effects into the neural network. Figure 1 illustrates the structure of FAIR.
+Case 
+Basic 
+Fact
+Encoder
+Training Encoder
+A
+B
+C
+D
+Injection Effect to NN 0 1 1 0 0 0.12 0.92 0.2 0.84 3 0.07
+Estimation 
+Causal Effect
+Construct Causal Graph
+Fig. 1: Overall structure of FAIR 3.1
+Modeling Causal Graph
+Preliminary Modeling and Analysis Before conducting a quantitative anal- ysis of causal effects, we need to model the problem based on prior knowledge to ensure the clarity of causal assumptions, and the modeling results are given in the form of a causal graph. We describe the possible causal relationships in the judgment with the help of legal experts as Figure 2(a). However, in Figure 2(a), we cannot directly estimate the causal relationship between "Judgment Basis" and "Case Basic Fact" because there are multiple causal paths between them, and we need to block the paths that are not directly connected. Considering the presence of unobserved confounders in Figure 2(a), we choose the instrumental variable method to block the paths through the confounders, which means that "Case Basic Fact" will be used as an instrumental variable, and it needs to sat- isfy the correlation and exogeneity. To ensure exogeneity, we need to block the direct path from the instrumental variable to the outcome, which means we need to extract the part of the instrumental variable that is relevant to the treatment and not relevant to the outcome, and we do this using a law article prediction task.
+Unobserved 
+Confounders
+Case Basic 
+Fact
+Judgment 
+Basis
+Change of 
+Judgment (a) Preliminary Causal Graph
+Unobserved 
+Confounders
+Encoded Case 
+Basic Fact
+Judgment 
+Basis
+Change of 
+Judgment (b) Target Causal Graph
+Fig. 2: Preliminary and Target Causal Graph
+FAIR 5
+Task Definition Given a factual description of the judgment containing n tokens X = {x1, x2, ..., xn} and a set L = {l1, l2, ..., lm} containing m legal entries, we want the model to find a many-to-one mapping F from set X to a subset of L, and the result of the mapping is denoted as an m-dimensional multi- hot vector. This task can be understood as a multi-label classification task.
+    """
+    path = '../uploads/3047b38215263278f07178419489a887.pdf'
+    res = await conclude_basic_information(path, text, "中文")
+    pass
+
 if __name__ == '__main__':
     # asyncio.run(test_translate())
     # asyncio.run(test_Extract_title())
+
+    # 提取 brief intro
     # asyncio.run(test_extract_brief_info())
 
-    #
-    # asyncio.run(test_extract_brief_info())
+
+    #  test_extract_brief_info
+    # asyncio.run(test_get_title_brief_info())
+
+    #   测试总结basic info
+    # asyncio.run(test_conclude_basic_information())
 
     # 测试全部总结
     asyncio.run(test_get_the_formatted_summary_from_pdf())

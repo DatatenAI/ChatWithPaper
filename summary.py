@@ -22,27 +22,40 @@ logger.opt(exception=True)
 PDF_SAVE_DIR = os.getenv("FILE_PATH")
 
 
+def delete_wrong_file(file_path: str, file_size: int = None):
+    """
+    删除文件
+    """
+    if file_size:
+        if Path(file_path).is_file() and Path(file_path).stat().st_size < file_size:
+            try:
+                Path(file_path).unlink()
+                return True
+            except Exception as e:
+                raise Exception(f"delete {file_path} error:{e}")
+        return False
+    else:
+        if Path(file_path).is_file():
+            try:
+                Path(file_path).unlink()
+                return True
+            except Exception as e:
+                raise Exception(f"delete {file_path} error:{e}")
+        return False
+
 def delete_wrong_summary_res(file_hash, language, summary_temp):
     base_path = os.path.join(PDF_SAVE_DIR, file_hash)
-    title_path = f"{base_path}.title.txt"
     complete_path = f"{base_path}.complete.txt"
     format_path = f"{base_path}.formated.{language}.txt"
     first_page_path = f"{base_path}.firstpage_conclusion.txt"
 
-    if Path(title_path).is_file() and Path(title_path).stat().st_size < 100:
-        Path(title_path).unlink()
-        if Path(first_page_path).is_file():
-            Path(first_page_path).unlink()
-    if not Path(title_path).is_file() and Path(first_page_path).is_file():
-        Path(first_page_path).unlink()
-    if Path(complete_path).is_file(
-    ) and Path(complete_path).stat().st_size < 1000:
-        Path(complete_path).unlink()
-    if not Path(complete_path).is_file() or not Path(title_path).is_file():
-        if Path(format_path).is_file():
-            Path(format_path).unlink()
-    if Path(format_path).is_file() and Path(format_path).stat().st_size < 1500:
-        Path(format_path).unlink()
+    if Path(first_page_path).is_file():   # 文件小于等于100字节
+        delete_wrong_file(first_page_path, file_size=100)
+    if Path(complete_path).is_file():
+        delete_wrong_file(complete_path, 1000)
+    if Path(format_path).is_file():
+        delete_wrong_file(format_path, 1500)
+
 
 from pydantic import BaseModel
 class SummaryData(BaseModel):
@@ -81,7 +94,7 @@ async def summary(summary_data:SummaryData):
         error_res = {"status": "error", "detail": str(e)}
         json.dumps(error_res, ensure_ascii=False, indent=4)     # 返回错误信息
         # Delete any previous wrong summary results associated with the summary_id
-        delete_wrong_summary_res(summary_id)
+        delete_wrong_summary_res(file_hash, language, summary_temp)
 
 
 async def process_summary(task_data):
