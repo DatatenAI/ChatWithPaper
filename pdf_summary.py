@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+from pathlib import Path
 from typing import Callable
 
 import aiofiles
@@ -10,13 +11,11 @@ from loguru import logger
 
 # 开发测试
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import optimize_openai
 from util import retry, token_str, gen_uuid
-
-
-
 
 chat_paper_api = optimize_openai.ChatPaperAPI(
     model_name="gpt-3.5-turbo-16k",
@@ -56,7 +55,8 @@ async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
     logger.info("end get paper title translation")
     return result[0], result[3]
 
-def truncate_title(title:str):
+
+def truncate_title(title: str):
     """
     让title不要超过一定长度
     """
@@ -65,6 +65,7 @@ def truncate_title(title:str):
     else:
         truncated_title = title[:180] + '...'
         return truncated_title
+
 
 async def From_BasicInfo_Extract_title(text: str, language: str) -> tuple:
     """
@@ -93,11 +94,50 @@ async def From_BasicInfo_Extract_title(text: str, language: str) -> tuple:
     logger.info("end extract paper title")
     return truncate_title(result[0]), result[3]
 
-async def get_title_brief_info(basic_info:str, final_res:str, language:str='中文')->tuple:
+
+async def From_FirstPage_Extract_BasicInfo(text: str, language: str) -> tuple:
     """
-    提取 title, brief info
+    从第一页的信息中提取出 Basic Info
     """
+    logger.info("start Extract paper basic")
+    convo_id = "Extract_paper_basic:" + str(gen_uuid())
+    chat_paper_api.reset(
+        convo_id=convo_id,
+        system_prompt=
+        "You are a research scientist and you are extracted the basic information with concise language and keep the same format."
+    )
+    logger.info(f"input title:{text}")
+    logger.info(f"origin title length:{len(text)}")
+    content = f"""Original Paper basic info is as follows: {text}, please extracted the basic info in {language}. 
+        Remember to:
+        - Retain proper nouns in original language.
+        - Retain authors in original language.
+
+        Organize your response using the following markdown structure:
+        
+        # Basic Information:
+        - Title: xxx
+        - Authors: xxx
+        - Affiliation: xxx
+        - Keywords: xxx
+        - URLs: xxx or xxx , xxx
+        """
+    result = await chat_paper_api.ask(prompt=content,
+                                      role="user",
+                                      convo_id=convo_id)
+    chat_paper_api.conversation[convo_id] = None
+    print_token("extract_paper_basic_info", result)
+    logger.info("end extract paper basic")
+    return truncate_title(result[0]), result[3]
+
+
+async def get_title_brief_info(first_page: str, final_res: str, language: str = '中文') -> tuple:
+    """
+    从第一页信息里面 提取 title, brief info
+    """
+    # TODO 从第一页信息里面提取
     logger.info("start get paper final basic info")
+
     # 尝试处理三次
     async def process_text(func: Callable[[str, str], object], text: str,
                            language: str) -> tuple:
@@ -107,15 +147,21 @@ async def get_title_brief_info(basic_info:str, final_res:str, language:str='中�
         else:
             raise Exception("No summary found")
 
+    async def process_basic():
+        res_basic = await process_text(From_FirstPage_Extract_BasicInfo, first_page, "中文")
+        basic_info = res_basic[0]
+        token_cost = res_basic[1]
+        return basic_info, token_cost
+
     # 定义并发执行的协程函数
     async def process_title_zh():
-        res_title_zh = await process_text(From_BasicInfo_Extract_title, basic_info, "中文")
+        res_title_zh = await process_text(From_BasicInfo_Extract_title, first_page, "中文")
         title_zh = res_title_zh[0]
         token_cost = res_title_zh[1]
         return title_zh, token_cost
 
     async def process_title():
-        res_title = await process_text(From_BasicInfo_Extract_title, basic_info, "English")
+        res_title = await process_text(From_BasicInfo_Extract_title, first_page, "English")
         title = res_title[0]
         token_cost = res_title[1]
         return title, token_cost
@@ -127,35 +173,54 @@ async def get_title_brief_info(basic_info:str, final_res:str, language:str='中�
         return brief_intro, token_cost
 
     # 并行执行协程任务
+    basic_task = process_basic()
     title_zh_task = process_title_zh()
     title_task = process_title()
     brief_intro_task = process_brief_intro()
     # 使用 asyncio.gather() 并行运行协程任务
-    results = await asyncio.gather(title_zh_task, title_task, brief_intro_task)
+    results = await asyncio.gather(basic_task, title_zh_task, title_task, brief_intro_task)
     # 提取各任务的结果
-    title_zh, token_cost_title_zh = results[0]
-    title, token_cost_title = results[1]
-    brief_intro, token_cost_intro = results[2]
+    basic_info, token_cost_basic = results[0]
+    title_zh, token_cost_title_zh = results[1]
+    title, token_cost_title = results[2]
+    brief_intro, token_cost_intro = results[3]
     # 计算总的 token_cost
-    token_cost = token_cost_title_zh + token_cost_title + token_cost_intro
+    token_cost = token_cost_basic + token_cost_title_zh + token_cost_title + token_cost_intro
 
-    # res_title_zh = await process_text(From_BasicInfo_Extract_title, basic_info, "中文")
-    # title_zh = res_title_zh[0]
-    # token_cost = token_cost + res_title_zh[1]
-    # res_title = await process_text(From_BasicInfo_Extract_title, basic_info, "English")
-    # title = res_title[0]
-    # token_cost = token_cost + res_title[1]
-    #
-    # content = await process_text(Extract_Brief_Introduction, final_res, language)
-    # brief_intro = content[0]
-    # token_cost = token_cost + content[1]
-
-    logger.info(f"end get paper title brief , title_zh:{title_zh}, title:{title}, brief intro:{brief_intro}, token_cost:{token_cost}")
-    if title and title_zh and brief_intro:
-        return title, title_zh, brief_intro, token_cost
+    logger.info(
+        f"end get paper title brief , title_zh:{title_zh}, title:{title}, brief intro:{brief_intro}, token_cost:{token_cost}")
+    if title and title_zh and basic_info and brief_intro:
+        return title, title_zh, basic_info, brief_intro, token_cost
     else:
         raise Exception("No summary found")
     pass
+
+
+async def read_str_files(file_path: str) -> str:
+    """
+    读取txt文件内容为字符串
+    """
+    # read file
+    if Path(file_path).is_file():
+        try:
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                data = await f.read()
+            return data
+        except Exception as e:
+            logger.error(f"read {file_path} error {e}")
+            raise f"read {file_path} error {e}"
+    else:
+        return ""
+
+
+async def save_str_files(file_data: str, file_path: str):
+    """
+    保存str内容为字符串txt
+    """
+    # save file title_zh_path
+    async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+        await f.write(file_data)
+
 
 async def get_the_formatted_summary_from_pdf(
         pdf_file_path: str,
@@ -164,13 +229,21 @@ async def get_the_formatted_summary_from_pdf(
 ) -> tuple:
     logger.info(f"start summary pdf,path:{pdf_file_path},language:{language}")
     base_path, ext = os.path.splitext(pdf_file_path)
-    new_path = f"{base_path}.formatted.{language}.txt"
+
+    first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
+    format_path = f"{base_path}.formatted.{language}.{summary_temp}.txt"
+    title_path = f"{base_path}.title.{language}.{summary_temp}.txt"
+    title_zh_path = f"{base_path}.title_zh.{language}.{summary_temp}.txt"
+    basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
+    brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
+    token_path = f"{base_path}.tokens.{language}.{summary_temp}.txt"
+
     token_cost_all = 0
-    if not os.path.isfile(new_path):  # 如果不存在
-        logger.info(f"{new_path} formatted txt not exists")
+    if not os.path.isfile(format_path):  # 如果不存在
+        logger.info(f"{format_path} formatted txt not exists")
         try:
-            complete_sum_res, token_cost = await get_the_complete_summary(
-                pdf_file_path, language=language, summary_temp=summary_temp)    # 信息压缩
+            complete_sum_res, firstpage_conclusion, token_cost = await get_the_complete_summary(
+                pdf_file_path, language=language, summary_temp=summary_temp)  # 信息压缩
         except Exception as e:
             logger.error(f"get the complete summary error: {e}")
             raise Exception(str(e))
@@ -179,7 +252,7 @@ async def get_the_formatted_summary_from_pdf(
             logger.error(f"complete summary is None")
             raise Exception("summary is None")
         complete_sum_res = str(complete_sum_res)
-        if len(str(complete_sum_res)) < 500:
+        if len(str(complete_sum_res)) < 200:
             raise Exception("summary is None")
         summary_res, token_cost = await get_paper_final_summary(
             text=complete_sum_res,
@@ -189,60 +262,75 @@ async def get_the_formatted_summary_from_pdf(
         token_cost_all += token_cost
         if not isinstance(summary_res, str):
             raise Exception("No summary found")
-        con_path = f"{base_path}.firstpage_conclusion.txt"
 
-        if not os.path.isfile(con_path) or os.path.getsize(con_path) < 50:
+        if not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 50:
             raise Exception("No conclusion found")
-        async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
-            basic_info = await f.read()
+
         # 如果不够稳定的话，可以用chat做完整的替代，这个成本应该不高，但是应该比较慢
         # 在这里将基本信息和总结信息拼接起来：      
         # 我们需要先将基本信息的标题单独提取出来；
         # 从basic_info 中提取中文title, brief intro
         summary_res = re.sub(r'\\+n', '\n', summary_res)
-        title, title_zh, brief_intro, token_cost = await get_title_brief_info(basic_info=basic_info, final_res=summary_res,language="中文")
+        # TODO 报错处理
+        title, title_zh, basic_info, brief_intro, token_cost = await get_title_brief_info(
+            first_page=firstpage_conclusion,
+            final_res=summary_res, language="中文")
         token_cost_all += token_cost
 
-        final_res = f"{basic_info}\n\n{summary_res}"
-        final_res = re.sub(r'\\+n', '\n', final_res)
+        basic_info = re.sub(r'\\+n', '\n', basic_info)
+        brief_intro = re.sub(r'\\+n', '\n', brief_intro)
+        final_res = re.sub(r'\\+n', '\n', summary_res)
+        title_zh = re.sub(r'\\+n', '\n', title_zh)
 
         # 在这儿存最终的总结文本信息：
-        # TODO 分开存信息
 
-        async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
-            await f.write(final_res)
-        return title, title_zh, basic_info, brief_intro, summary_res, token_cost_all
+        # save file title_path
+        await save_str_files(title, title_path)
+        await save_str_files(title_zh, title_zh_path)
+        await save_str_files(basic_info, basic_info_path)
+        await save_str_files(brief_intro, brief_intro_path)
+        await save_str_files(final_res, format_path)
+        await save_str_files(str(token_cost_all),token_path)
 
-    else:
-        # TODO 改语言
-        logger.info(f"{new_path} formatted txt exists")
-        con_path = f"{base_path}.firstpage_conclusion.txt"
-        if not os.path.isfile(con_path) or os.path.getsize(con_path) < 50:
+        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, token_cost_all
+
+    else:  # 如果format 文件存在
+        logger.info(f"{format_path} formatted txt exists")
+
+        if not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 50:
             raise Exception("No conclusion found")
-        async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
-            basic_info = await f.read()
-        async with aiofiles.open(new_path, "r", encoding="utf-8") as f:
-            res = await f.read()
-            res = re.sub(r'\\+n', '\n', res)
-        return basic_info, res, token_cost_all
+
+        title = await read_str_files(title_path)
+        title_zh = await read_str_files(title_zh_path)
+        basic_info = await read_str_files(basic_info_path)
+        brief_intro = await read_str_files(brief_intro_path)
+        firstpage_conclusion = await read_str_files(first_page_path)
+        final_res = await read_str_files(format_path)
+        token_cost_all = await read_str_files(token_path)
+        token_cost_all = int(0 if token_cost_all=='' else int(token_cost_all))
+        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, token_cost_all
 
 
 async def get_the_complete_summary(pdf_file_path: str, language: str, summary_temp: str = 'default') -> tuple:
+    """
+    处理返回全部总结和第一页的总结
+    """
     logger.info("start get complete summary")
     base_path, ext = os.path.splitext(pdf_file_path)
-    new_path = f"{base_path}.complete.txt"      # 完整的文本内容
-    first_page_path = f"{base_path}.firstpage_conclusion.txt"
+    new_path = f"{base_path}.complete.{language}.{summary_temp}.txt"  # 完整的文本内容
+    first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
     result = None
     token_cost_all = 0
     # 开始处理长文本内容。
-    if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:    # 如果不存在或者小于 1000 字节
+    if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:  # 如果不存在或者小于 1000 字节
         result, first_page_info, token = await rewrite_paper_and_extract_information(
             pdf_file_path, language=language)
         token_cost_all += token
-        async with aiofiles.open(new_path, "w", encoding="utf-8") as f:
-            await f.write(result)
+        # save file complete
+        await save_str_files(result, new_path)
+        await save_str_files(first_page_info, first_page_path)
     elif not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 100:
-        sentences = get_paper_split_res(pdf_file_path)      # 将paper内容拆分
+        sentences = get_paper_split_res(pdf_file_path)  # 将paper内容拆分
         if len(sentences) == 0:
             raise Exception("there is no text in the paper")
         # 当选择16K模型时，则不需要压缩：
@@ -250,10 +338,11 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
         # result, token_cost = await asyncio.gather(*tasks)
         result = "\n".join(sentences)
         token_cost_all += 0
-    async with aiofiles.open(new_path, "r", encoding="utf-8") as f:
-        result = await f.read()
+    # read file
+    result = await read_str_files(new_path)
+    first_page_info = await read_str_files(first_page_path)
     logger.info(f"end get complete summary,token_cost_all: {token_cost_all}")
-    return result, token_cost_all
+    return result, first_page_info, token_cost_all
 
 
 async def rewrite_paper_and_extract_information(path: str, language: str) -> tuple:
@@ -272,7 +361,7 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
     # results = await asyncio.gather(*tasks)
     sentence_tasks = [process_sentence(sentence, sentences_length) for sentence in sentences]
     results = await asyncio.gather(*sentence_tasks)
-    informations = await process_information(sentences[0], path, language=language)
+    informations = await process_information(sentences[0], path, language=language)  # 第一页的信息
     rewrite_str = ""
     token_cost = 0
     for result in results:
@@ -317,6 +406,9 @@ def get_paper_split_res(
         split_page: int = 2,
         extract_last: bool = True,
         max_token: int = 2560) -> list[str]:
+    """
+    paper 拆分
+    """
     string_steps = [800, 400, 200]
 
     with fitz.open(path) as doc:
@@ -538,9 +630,6 @@ async def translate_summary(text, lang: str) -> tuple:
     return result[0], result[3]
 
 
-
-
-
 def truncate_text(text, max_token=2560, steps=None):
     if steps is None:
         steps = [800, 400, 200]
@@ -564,7 +653,7 @@ async def process_information(sentence: str, path: str, language: str):
     try:
         result = await retry(
             3,
-            conclude_basic_information,
+            conclude_first_page_information,
             path=path,
             text=sentence,
             language=language
@@ -572,18 +661,21 @@ async def process_information(sentence: str, path: str, language: str):
         return result
     except Exception as e:
         logger.error(f"process information error,path {path},err: {e}")
-        return e
+        return "", 0
 
 
-async def conclude_basic_information(path: str, text: str, language: str) -> tuple:
+async def conclude_first_page_information(path: str, text: str,
+                                          language: str,
+                                          summary_temp: str = 'default') -> tuple:
     """
     总结 title, 第一页的结论
     """
-    logger.info(f"start conclude basic information,path:{path}")
+    logger.info(f"start conclude firstpage conclusion information,path:{path}")
     base_path, ext = os.path.splitext(path)
-    con_path = f"{base_path}.firstpage_conclusion.txt"
+    con_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
     # title_path = f"{base_path}.title.txt"
     if os.path.isfile(con_path) and os.path.getsize(con_path) > 50:
+        # read file
         async with aiofiles.open(con_path, "r", encoding="utf-8") as f:
             text = await f.read()
             text = re.sub(r'\\+n', '\n', text)
@@ -598,12 +690,11 @@ async def conclude_basic_information(path: str, text: str, language: str) -> tup
     logger.info(f"input text:{text}")
     logger.info(f"origin text length:{len(text)}")
 
-    # chat_paper_api.add_to_conversation(
-    #     message=
-    #     "This is the first page of a research paper, and I need your help to read and summarize some questions: "
-    #     + text,
-    #     role="system",
-    #     convo_id=convo_id)
+    chat_paper_api.add_to_conversation(
+        message=
+        "This is the first page of a research paper, and I can help me to read and summarize some questions",
+        role="system",
+        convo_id=convo_id)
     if language == "中文":
         content = f"""
         This is the first page of a research paper, and I need your help to read and summarize some questions.
@@ -695,13 +786,14 @@ async def conclude_basic_information(path: str, text: str, language: str) -> tup
     result = await chat_paper_api.ask(prompt=content,
                                       role="user",
                                       convo_id=convo_id)
-    print_token("conclude_basic_information", result)
+    print_token("conclude_first_page_information", result)
     chat_paper_api.conversation[convo_id] = None
     res = re.sub(r'\\+n', '\n', str(result[0]))
+    # save file
     async with aiofiles.open(con_path, "w", encoding="utf-8") as f:
         await f.write(res)
         logger.info(f"write {con_path}")
-    logger.info(f"end conclude basic information")
+    logger.info(f"end conclude first page conclusion information")
     return res, result[3]
 
 
@@ -769,7 +861,7 @@ def print_token(tip, result):
         f"{tip} prompt used: {str(result[1])} tokens. Completion used: {str(result[2])} tokens. Totally used: {str(result[3])} tokens.")
 
 
-
+#############################################################################
 async def test_translate():
     text = """
     Recommender systems play a vital role in various online services.
@@ -798,6 +890,7 @@ compatible with a wide range of recommendation algorithms.
     res = await translate_summary(text=text, lang="中文")
     print(res)
 
+
 async def test_Extract_title():
     text = """
 # Basic Information:
@@ -815,6 +908,8 @@ async def test_Extract_title():
 
     res, tokens = await From_BasicInfo_Extract_title(text=text, lang="English")
     print(res)
+
+
 async def test_extract_brief_info():
     text = """
     # Basic Information: 
@@ -861,6 +956,7 @@ LoRA方法的实施包括用于与PyTorch模型集成的软件包以及提供RoB
     """
     res, tokens = await Extract_Brief_Introduction(text=text, language="中文")
     print(res)
+
 
 async def test_get_title_brief_info():
     basic_info = """
@@ -935,6 +1031,7 @@ async def test_get_title_brief_info():
     res = await get_title_brief_info(basic_info, summ, "中文")
     print(res)
 
+
 async def test_get_the_formatted_summary_from_pdf():
     pdf_path = '../uploads/3047b38215263278f07178419489a887.pdf'
     language = '中文'
@@ -943,7 +1040,8 @@ async def test_get_the_formatted_summary_from_pdf():
     res = await get_the_formatted_summary_from_pdf(pdf_path, language, summary_temp=summary_temp)
     print(res)
 
-async def test_conclude_basic_information():
+
+async def test_conclude_first_page_information():
     text = """
     FAIR: A Causal Framework for Accurately
 Inferring Judgments Reversals
@@ -1019,8 +1117,37 @@ FAIR 5
 Task Definition Given a factual description of the judgment containing n tokens X = {x1, x2, ..., xn} and a set L = {l1, l2, ..., lm} containing m legal entries, we want the model to find a many-to-one mapping F from set X to a subset of L, and the result of the mapping is denoted as an m-dimensional multi- hot vector. This task can be understood as a multi-label classification task.
     """
     path = '../uploads/3047b38215263278f07178419489a887.pdf'
-    res = await conclude_basic_information(path, text, "中文")
+    res = await conclude_first_page_information(path, text, "中文")
     pass
+
+
+async def test_extract_basic():
+    text = """
+    # Basic Information:
+ - Title: FAIR: A Causal Framework for Accurately Inferring Judgments Reversals (FAIR: 一个用
+准确推断判决翻转的因果框架)
+- Authors: Minghua He, Nanfei Gu, Yuntao Shi, Qionghui Zhang, Yaying Chen
+- Affiliation: College of Computer Science and Technology, Jilin University, Changchun, China
+(吉林大学计算机科学与技术学院)
+- Keywords: Legal Intelligence, Causal Inference, Language Processing
+- URLs: [Paper](https://arxiv.org/abs/2306.11585v1), [GitHub: None]
+ # 论文简要 :
+ - 本文提出了一个因果框架FAIR,用于准确推断判决翻转。通过因果推断方法挖掘判决翻转的原因,并
+获得的因果关系作为先验知识注入神经网络,从而提高模型的性能。
+ # 背景信息:
+ - 论文背景: 近年来,人工智能研究人员在法律智能方面取得了重要进展。然而,现有研究并未关注判决
+转中蕴含的重要价值,这限制了法律智能效率的提高。
+- 过去方案: 过去的研究工作忽视了判决翻转的问题,而判决翻转是与法律应用直接相关的领域。判决翻
+问题与人工智能技术的应用方向和模型效果直接相关。在法律判决预测任务中,提取判决翻转中的因果
+系作为先验知识有助于提高模型预测的准确性和可解释性。
+- 论文的Motivation: 本文的动机是解决现有法律智能研究中忽视的判决翻转问题。作者通过因果推断方
+挖掘判决翻转的原因,并将获得的因果关系注入神经网络模型,从而提高模型的性能。同时,作者还探
+了大型语言模型在法律智能任务中的泛化能力,并发现挖掘因果关系可以有效提高模型预测的准确性和
+释能力。
+    """
+    res = await From_FirstPage_Extract_BasicInfo(text, "中文")
+    print(res)
+
 
 if __name__ == '__main__':
     # asyncio.run(test_translate())
@@ -1029,12 +1156,14 @@ if __name__ == '__main__':
     # 提取 brief intro
     # asyncio.run(test_extract_brief_info())
 
-
     #  test_extract_brief_info
     # asyncio.run(test_get_title_brief_info())
 
-    #   测试总结basic info
-    # asyncio.run(test_conclude_basic_information())
+    # 从 first page info 提取 basic info
+    # asyncio.run(test_extract_basic())
+
+    #   测试总结first page info
+    # asyncio.run(test_conclude_first_page_information())
 
     # 测试全部总结
     asyncio.run(test_get_the_formatted_summary_from_pdf())

@@ -1,13 +1,14 @@
 import asyncio
+import datetime
 import json
 import os
 import re
 from pathlib import Path
+from typing import Union, Tuple
 
 import flask
 from dotenv import load_dotenv
 from loguru import logger
-
 
 load_dotenv()
 import chat_db
@@ -43,26 +44,40 @@ def delete_wrong_file(file_path: str, file_size: int = None):
                 raise Exception(f"delete {file_path} error:{e}")
         return False
 
-def delete_wrong_summary_res(file_hash, language, summary_temp):
-    base_path = os.path.join(PDF_SAVE_DIR, file_hash)
-    complete_path = f"{base_path}.complete.txt"
-    format_path = f"{base_path}.formated.{language}.txt"
-    first_page_path = f"{base_path}.firstpage_conclusion.txt"
 
-    if Path(first_page_path).is_file():   # 文件小于等于100字节
+def delete_wrong_summary_res(file_hash: str, language: str, summary_temp: str):
+    """
+    :param language: 语言
+    :summary_temp: 总结模板
+    """
+    base_path = os.path.join(PDF_SAVE_DIR, file_hash)
+    complete_path = f"{base_path}.complete.{language}.{summary_temp}.txt"  #
+    format_path = f"{base_path}.formated.{language}.{summary_temp}.txt"
+    first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"  #
+    basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
+    brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
+
+    if Path(first_page_path).is_file():  # 文件小于等于100字节
         delete_wrong_file(first_page_path, file_size=100)
     if Path(complete_path).is_file():
         delete_wrong_file(complete_path, 1000)
     if Path(format_path).is_file():
         delete_wrong_file(format_path, 1500)
+    if Path(basic_info_path).is_file():
+        delete_wrong_file(basic_info_path, 100)
+    if Path(brief_intro_path).is_file():
+        delete_wrong_file(brief_intro_path, 100)
 
 
 from pydantic import BaseModel
+
+
 class SummaryData(BaseModel):
     user_type: str
     pdf_hash: str
     language: str
     summary_temp: str
+
 
 class TranslateDate(BaseModel):
     user_type: str
@@ -70,8 +85,9 @@ class TranslateDate(BaseModel):
     language: str
     translate_temp: str
 
+
 # async def summary(summary_id: str):
-async def summary(summary_data:SummaryData):
+async def summary(summary_data: SummaryData) -> Union[Tuple, None]:
     user_type = summary_data.user_type
     file_hash = summary_data.pdf_hash
     language = summary_data.language
@@ -81,59 +97,148 @@ async def summary(summary_data:SummaryData):
     pdf_path = os.path.join(PDF_SAVE_DIR, f"{file_hash}.pdf")
     if not Path(pdf_path).is_file():
         logger.error(f'file {file_hash}.pdf  not found')
-        return None
-
+        raise f'file {file_hash}.pdf  not found'
     try:
-        # Generate the summary from the PDF file
-        title, title_zh, basic_info, brief_intro, summary_res, token_cost_all = await pdf_summary.get_the_formatted_summary_from_pdf(
-            pdf_path, language, summary_temp=summary_temp)
-
-        return title, title_zh, basic_info, brief_intro, summary_res, token_cost_all
+        # 选择模板
+        if summary_temp == 'default':
+            # Generate the summary from the PDF file
+            title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, token_cost_all = await pdf_summary.get_the_formatted_summary_from_pdf(
+                pdf_path, language, summary_temp=summary_temp)
+            return title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, token_cost_all
+        # TODO 其他模板
+        else:
+            logger.error(f"summary temp error: no {summary_temp} temp")
+            error_res = {"status": "error", "detail": f"summary temp error: no {summary_temp} temp"}
+            raise json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
     except Exception as e:
         logger.error(f"generate summary error:{e}", )
         error_res = {"status": "error", "detail": str(e)}
-        json.dumps(error_res, ensure_ascii=False, indent=4)     # 返回错误信息
         # Delete any previous wrong summary results associated with the summary_id
         delete_wrong_summary_res(file_hash, language, summary_temp)
+        raise json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
 
 
 async def process_summary(task_data):
     """
-    summary的处理逻辑
+    summary的处理逻辑和扣款逻辑
     """
     pdf_hash = task_data['pdf_hash']
     user_type = task_data['user_type']
-    # 总结逻辑
     user_id = task_data['user_id']
-
-
+    pages = task_data['pages']
+    # 总结逻辑
     logger.info(f"user id {user_id}")
+
     summary_data = SummaryData(
         user_type=task_data['user_type'],
         pdf_hash=task_data['pdf_hash'],
         language=task_data['language'],
         summary_temp=task_data['temp']
     )
-    res = await summary(summary_data=summary_data)
+    try:
+        res = await summary(summary_data=summary_data)
+    except Exception as e:
+        logger.error(f"generate summary error:{e}", )
+        error_res = {"status": "error", "detail": str(e)}
+        str_error_res = json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
+        # TODO 处理报错信息
+        if user_type == 'spider':
+            # TODO 写报错信息和改变状态
+            task_obj = db.SubscribeTasks.update(state='FAIL',
+                                                tokens=0,
+                                                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                                ).where(
+                db.SubscribeTasks.pdf_hash == pdf_hash,
+                db.SubscribeTasks.type == task_data['type'],
+                db.SubscribeTasks.language == task_data['language']).execute()
+            logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
+
+        elif user_type == 'user':
+            # 写报错信息
+            task_obj = db.UserTasks.update(
+                user_id=task_data['user_id'],
+                state='FAIL',
+                cost_credits=0,
+                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ).where(
+                db.UserTasks.user_id == task_data['user_id'],
+                db.UserTasks.pdf_hash == pdf_hash,
+                db.UserTasks.language == task_data['language'],
+                db.UserTasks.type == task_data['type'],
+            ).execute()
+            logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
+            # TODO 还钱
+
+
+            logger.info(f"give back user {user_id}, points {pages}")
+
+        raise str_error_res
+
+    title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, token_cost_all = res
     # 扣费和写表逻辑
     if user_type == 'spider':
-        pass
+        # TODO 将数据写入到SubscribeTasks任务表中和summaries表中
+        # 添加任务表并传参数
+        try:
+            task_obj = db.SubscribeTasks.update(state='SUCCESS',
+                                                tokens=token_cost_all,
+                                                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                                ).where(
+                db.SubscribeTasks.pdf_hash == pdf_hash,
+                db.SubscribeTasks.type == task_data['type'],
+                db.SubscribeTasks.language == task_data['language']).execute()
+            logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
+            # 添加进summaries
+            summary_obg = db.Summaries.create(
+                pdf_hash=pdf_hash,
+                language=task_data['language'],
+                title=title,
+                title_zh=title_zh,
+                basic_info=basic_info,
+                brief_introduction=brief_intro,
+                first_page_conclusion=firstpage_conclusion,
+                content=summary_res,
+            )
+            logger.info(f"add summaries id={summary_obg}, pdf_hash={pdf_hash}")
+        except Exception as e:
+            logger.error(f"{e}")
+
     elif user_type == 'user':
-        if res:
-            points = task_data['pages']
-            if util.is_cost_purchased(user, estimate_token):
-                await user_db.update_token_consumed_paid(user_id, points)
-        return
-        pass
+        # TODO 将数据写入到任务表中和summaries表中
+        points = task_data['pages']
+        # if util.is_cost_purchased(user, estimate_token):
+        #     await user_db.update_token_consumed_paid(user_id, points)
 
-
-    # "user_type": user_type,
-    # "task_id": task_id,
-    # "task_type": task.type,
-    # "language": task.language,
-    # "pdf_hash": task.pdf_hash
+        try:
+            task_obj = db.UserTasks.update(
+                user_id=task_data['user_id'],
+                state='SUCCESS',
+                cost_credits=token_cost_all,
+                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ).where(
+                db.UserTasks.user_id == task_data['user_id'],
+                db.UserTasks.pdf_hash == pdf_hash,
+                db.UserTasks.language == task_data['language'],
+                db.UserTasks.type == task_data['type'],
+                ).execute()
+            logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
+            # 添加进summaries
+            summary_obg = db.Summaries.create(
+                pdf_hash=pdf_hash,
+                language=task_data['language'],
+                title=title,
+                title_zh=title_zh,
+                basic_info=basic_info,
+                brief_introduction=brief_intro,
+                first_page_conclusion=firstpage_conclusion,
+                content=summary_res,
+            )
+            logger.info(f"add user {task_data['user_id']}, summaries id={summary_obg}, pdf_hash={pdf_hash}")
+        except Exception as e:
+            logger.error(f"{e}")
 
     return None
+
 
 def handler(event_str):
     try:
@@ -148,11 +253,12 @@ def handler(event_str):
         logger.error(f"handler error: {e}")
 
 
-
 async def testUserTask():
     pass
-async def testSubTask():
-    task_id = '4'
+
+
+async def test_SubTask():
+    task_id = '3'
     user_type = 'spider'
 
     task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)
@@ -161,7 +267,7 @@ async def testSubTask():
         dumps = json.dumps({
             "user_type": user_type,
             "task_id": task_id,
-            "user_id": 'chat-paper',    # 添加用户id
+            "user_id": 'chat-paper',  # 添加用户id
             "task_type": task.type,
             "language": task.language,
             "pages": task.pages,
@@ -171,5 +277,20 @@ async def testSubTask():
         task_data = json.loads(dumps)
         await process_summary(task_data)
 
+async def test_summary():
+    summary_data = SummaryData(
+        user_type= 'spider',
+        pdf_hash= '3047b38215263278f07178419489a887',
+        language='中文',
+        summary_temp='default1'
+    )
+    summary_res = await summary(summary_data)
+    print(summary_res)
+    pass
+
 if __name__ == '__main__':
-    asyncio.run(testSubTask())
+    asyncio.run(test_SubTask())
+
+
+    # 测试 summary
+    # asyncio.run(test_summary())

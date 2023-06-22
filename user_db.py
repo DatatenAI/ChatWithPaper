@@ -2,6 +2,15 @@ import redis_manager
 from constants import FREE_TOKEN
 import db
 from loguru import logger
+
+
+
+async def update_points_consumed(user_id: str,
+                                 points_consumed: float):
+
+    pass
+
+
 async def update_token_consumed_paid(user_id: str,
                                      token_consumed_increase: float):
     lock_name = "consumed_token_paid" + user_id

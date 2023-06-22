@@ -121,7 +121,7 @@ class UserTasks(BaseModelNew):
     state = CharField(choices=('WAIT', 'RUNNING', 'SUCCESS', 'FAIL'))
     created_at = DateTimeField(default=datetime.datetime.now)
     finished_at = DateTimeField(null=True)
-    cost_credits = IntegerField()
+    cost_credits = IntegerField()   #
     pages = IntegerField()
 
     class Meta:
@@ -145,19 +145,17 @@ class SubscribeTasks(BaseModelNew):
 # 总结表
 class Summaries(BaseModelNew):
     id = AutoField(primary_key=True)
-    basic_info = CharField()
-    briefIntroduction = CharField()
-    content = CharField()
-    create_time = DateTimeField()
-    first_page_conclusion = CharField()
-    language = CharField()
-    medium_content = CharField()
     pdf_hash = CharField()
-    short_content = CharField()
-    short_title = CharField()
+    language = CharField()
     title = CharField()
     title_zh = CharField()
-    update_time = DateTimeField()
+    basic_info = CharField()
+    brief_introduction = CharField()
+    first_page_conclusion = CharField()
+    content = CharField()
+    medium_content = CharField()
+    short_content = CharField()
+    create_time = DateTimeField(default=datetime.datetime.now)
 
     class Meta:
         table_name = 'summaries'
