@@ -5,8 +5,7 @@ import httpx
 from loguru import logger
 
 import api_key_db
-import util
-
+from modules import util
 
 
 class ChatPaperAPI:

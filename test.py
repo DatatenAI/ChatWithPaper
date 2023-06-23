@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
 from loguru import logger
-load_dotenv()
+if os.getenv('ENV') == 'DEV':
+    load_dotenv()
 
 from summary import delete_wrong_summary_res
 

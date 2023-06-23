@@ -1,10 +1,10 @@
 import os
 import datetime
 from peewee import *
+from dotenv import load_dotenv
 
-
-# from dotenv import load_dotenv
-# load_dotenv()
+if os.getenv('ENV') == 'DEV':
+    load_dotenv()
 
 import logging
 

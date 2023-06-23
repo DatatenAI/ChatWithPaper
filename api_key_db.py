@@ -1,10 +1,10 @@
 from typing import Union
-
+import os
 from loguru import logger
+from dotenv import load_dotenv
 
-
-# from dotenv import load_dotenv
-# load_dotenv()
+if os.getenv('ENV') == 'DEV':
+    load_dotenv()
 
 import db
 import numpy as np

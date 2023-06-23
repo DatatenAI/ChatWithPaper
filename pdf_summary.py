@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 from pathlib import Path
@@ -12,10 +13,14 @@ from loguru import logger
 # 开发测试
 from dotenv import load_dotenv
 
-load_dotenv()
+from modules.fileactioins.filesplit import get_paper_split_res
+from modules.vectors.get_embeddings import embed_text
+
+if os.getenv('ENV') == 'DEV':
+    load_dotenv()
 
 import optimize_openai
-from util import retry, token_str, gen_uuid
+from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file
 
 chat_paper_api = optimize_openai.ChatPaperAPI(
     model_name="gpt-3.5-turbo-16k",
@@ -128,7 +133,7 @@ async def From_FirstPage_Extract_BasicInfo(text: str, language: str) -> tuple:
     chat_paper_api.conversation[convo_id] = None
     print_token("extract_paper_basic_info", result)
     logger.info("end extract paper basic")
-    return truncate_title(result[0]), result[3]
+    return result[0], result[3]
 
 
 async def get_title_brief_info(first_page: str, final_res: str, language: str = '中文') -> tuple:
@@ -237,6 +242,7 @@ async def get_the_formatted_summary_from_pdf(
     basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
     brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
     token_path = f"{base_path}.tokens.{language}.{summary_temp}.txt"
+    pdf_vec_path = f"{base_path}.vec.pkl"
 
     token_cost_all = 0
     if not os.path.isfile(format_path):  # 如果不存在
@@ -282,6 +288,18 @@ async def get_the_formatted_summary_from_pdf(
         final_res = re.sub(r'\\+n', '\n', summary_res)
         title_zh = re.sub(r'\\+n', '\n', title_zh)
 
+        # 向量化
+        meta_data = json.dumps({
+            "title": title,
+            "title_zh": title_zh,
+            "basic_info": basic_info,
+            "brief_intro": brief_intro,
+            "summary": summary_res
+        }, ensure_ascii=False, indent=4)
+        if Path(pdf_vec_path).is_file():
+            pdf_vec = await load_from_file(pdf_vec_path)
+        else:
+            pdf_vec = await embed_text(meta_data)
         # 在这儿存最终的总结文本信息：
 
         # save file title_path
@@ -290,9 +308,12 @@ async def get_the_formatted_summary_from_pdf(
         await save_str_files(basic_info, basic_info_path)
         await save_str_files(brief_intro, brief_intro_path)
         await save_str_files(final_res, format_path)
-        await save_str_files(str(token_cost_all),token_path)
+        await save_str_files(str(token_cost_all), token_path)
+        await save_to_file(pdf_vec, pdf_vec_path)    #  存储单篇文章的向量化内容
 
-        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, token_cost_all
+        # 扣费和写表逻辑
+
+        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
 
     else:  # 如果format 文件存在
         logger.info(f"{format_path} formatted txt exists")
@@ -307,8 +328,10 @@ async def get_the_formatted_summary_from_pdf(
         firstpage_conclusion = await read_str_files(first_page_path)
         final_res = await read_str_files(format_path)
         token_cost_all = await read_str_files(token_path)
+        pdf_vec = await load_from_file(pdf_vec_path)
+
         token_cost_all = int(0 if token_cost_all=='' else int(token_cost_all))
-        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, token_cost_all
+        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
 
 
 async def get_the_complete_summary(pdf_file_path: str, language: str, summary_temp: str = 'default') -> tuple:
@@ -330,7 +353,7 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
         await save_str_files(result, new_path)
         await save_str_files(first_page_info, first_page_path)
     elif not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 100:
-        sentences = get_paper_split_res(pdf_file_path)  # 将paper内容拆分
+        sentences = await get_paper_split_res(pdf_file_path)  # 将paper内容拆分
         if len(sentences) == 0:
             raise Exception("there is no text in the paper")
         # 当选择16K模型时，则不需要压缩：
@@ -348,7 +371,7 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
 async def rewrite_paper_and_extract_information(path: str, language: str) -> tuple:
     # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
-    sentences = get_paper_split_res(path)
+    sentences = await get_paper_split_res(path)
     if len(sentences) == 0:
         raise Exception("there is no text in the paper")
     sentences_length = len(sentences)
@@ -360,8 +383,19 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
     #
     # results = await asyncio.gather(*tasks)
     sentence_tasks = [process_sentence(sentence, sentences_length) for sentence in sentences]
-    results = await asyncio.gather(*sentence_tasks)
-    informations = await process_information(sentences[0], path, language=language)  # 第一页的信息
+    information_task = process_information(sentences[0], path, language=language)
+
+    # 使用 asyncio.gather() 并行执行两个任务
+    results, information_result = await asyncio.gather(asyncio.gather(*sentence_tasks), information_task)
+
+    # 解包获取每个任务的结果
+    sentence_results = results[0]
+    informations = information_result
+
+    # sentence_tasks = [process_sentence(sentence, sentences_length) for sentence in sentences]
+    # results = await asyncio.gather(*sentence_tasks)
+    # informations = await process_information(sentences[0], path, language=language)  # 第一页的信息
+
     rewrite_str = ""
     token_cost = 0
     for result in results:
@@ -373,107 +407,10 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
     return rewrite_str, informations[0], token_cost
 
 
-def find_next_section(text):
-    pattern = r'\n[A-Z]'
-    match = re.search(pattern, text)
-    if match:
-        return match.start()
-    else:
-        return 0
 
 
-def replace_newlines(text):
-    punctuation = ".?!"
-    uppercase_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    result = []
-    i = 0
-
-    while i < len(text) - 1:
-        if text[i] == '\n':
-            if text[i - 1] not in punctuation and text[i + 1] not in uppercase_letters:
-                result.append(' ')
-            else:
-                result.append(text[i])
-        else:
-            result.append(text[i])
-        i += 1
-    result.append(text[-1])
-    return ''.join(result)
 
 
-def get_paper_split_res(
-        path: str,
-        split_page: int = 2,
-        extract_last: bool = True,
-        max_token: int = 2560) -> list[str]:
-    """
-    paper 拆分
-    """
-    string_steps = [800, 400, 200]
-
-    with fitz.open(path) as doc:
-        text = ''.join(page.get_text("text") for page in doc)
-    logger.info(f"{len(text.split(' '))} original text words")
-    # clip text by reference
-    reference_index = text.lower().find("references")
-    if reference_index > 0:
-        main_text = text[:reference_index]
-    else:
-        reference_index = text.find("References")
-        main_text = text[:reference_index]
-    text = main_text
-    logger.info(f"{len(text.split(' '))} clip text words")
-
-    # split by words
-    res = []
-    num_split = len(text) // max_token
-    logger.info(f"{num_split} original num_split")
-    # split by tokens
-    num_split = token_str(text) // max_token + 1
-    logger.info(f"{num_split} token num_split")
-
-    # 接下来将text分割成num_split个部分, 且每个部分之间的间隔是按照\n 大写字母来分割的。
-    for index in range(num_split):
-        # 每个部分都从第一个字符开始
-        split_str_index = 0
-        # 当切分字符小于最大的字符数时，继续切分
-        while split_str_index < len(text):
-            # 逐步切分，每次切分的字符数是string_steps中的一个值
-            for step in string_steps:
-                # 下一次切割的字符数，是step和剩下的字符数中的最小值
-                next_str_step = min(step, len(text) - split_str_index)
-                # 先加上下一次切割的字符数，看看是否超过了最大的字符数
-                temp_text = text[:split_str_index + next_str_step]
-                # 如果没有超过，那么就把本次切割字符数加上去
-                if token_str(temp_text) <= max_token:
-                    # 把切割字符数加上去，跳出循环，进行下一次切割
-                    split_str_index += next_str_step
-                    break
-            # 如果切割字符数超过了最大的字符数，那么就把上一次的切割字符数作为切割的字符数
-            else:
-                # 到了最大的切割字符，需要补齐一下最近的一个段落索引。
-                temp_split_str_index = find_next_section(text[split_str_index:])
-                # 先测测加上这个字符数是否超过了最大的字符数
-                temp_text = text[:split_str_index + temp_split_str_index]
-                # 如果没有超过，那么就把补齐的索引加上
-                if token_str(temp_text) <= max_token + 100:
-                    # 把切割字符数加上去，跳出循环，进行下一次切割
-                    split_str_index += temp_split_str_index
-                    # 如果超过了，那么就不加了，直接跳出循环
-                break
-        res.append(text[:split_str_index])
-        # 把text更新成剩下的部分
-        text = text[split_str_index:]
-
-        # 这里将每个
-    temp_paper_split = []
-    for ps in res:
-        # print("original_text:", ps)
-        if len(ps) > 1:
-            format_text = replace_newlines(ps)
-            # print("format_text:", format_text)
-            temp_paper_split.append(format_text)
-    return temp_paper_split
 
 
 async def get_paper_final_summary(text: str,
@@ -541,7 +478,7 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper.org .
 
     Please analyze the following original text and generate the response based on it:
     Original text:
@@ -579,7 +516,7 @@ async def get_paper_summary(text, lang: str) -> tuple:
             - xxx
 
     # Note:
-    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
+    - 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper.org .
 
     Please analyze the following original text and generate the response based on it:
     Original text:
@@ -1033,10 +970,13 @@ async def test_get_title_brief_info():
 
 
 async def test_get_the_formatted_summary_from_pdf():
-    pdf_path = '../uploads/3047b38215263278f07178419489a887.pdf'
+    pdf_path = '../uploads/0bf316e9c1daea38a8250c2201e42dfc.pdf'
     language = '中文'
     summary_temp = 'default'
-
+    if os.path.exists(pdf_path):
+        print("file exists")
+    else:
+        return None
     res = await get_the_formatted_summary_from_pdf(pdf_path, language, summary_temp=summary_temp)
     print(res)
 
@@ -1148,10 +1088,25 @@ async def test_extract_basic():
     res = await From_FirstPage_Extract_BasicInfo(text, "中文")
     print(res)
 
+async def test_get_paper_split_res():
+    pdf_path = '../uploads/0bf316e9c1daea38a8250c2201e42dfc.pdf'
+
+    # pdf_path = '../uploads/3047b38215263278f07178419489a887.pdf'
+    # pdf_path = '../uploads/1c600238d3800bd2d1386ab7943b57ad.pdf'
+
+    res = await get_paper_split_res(pdf_path, max_token=512)
+    print(res)
+
+async def test_rewrite_paper_and_extract_information():
+
+    pass
 
 if __name__ == '__main__':
     # asyncio.run(test_translate())
     # asyncio.run(test_Extract_title())
+
+    # 测试拆分
+    # asyncio.run(test_get_paper_split_res())
 
     # 提取 brief intro
     # asyncio.run(test_extract_brief_info())
@@ -1167,3 +1122,5 @@ if __name__ == '__main__':
 
     # 测试全部总结
     asyncio.run(test_get_the_formatted_summary_from_pdf())
+
+    pass

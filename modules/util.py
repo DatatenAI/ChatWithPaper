@@ -1,5 +1,6 @@
 import logging
 import os
+import pickle
 import uuid
 from typing import Union
 
@@ -43,6 +44,40 @@ async def retry(tries: int, function, *args,
             logging.info(f"attempt execute function error,tries: {attempt},error:{e}")
             continue
 
+def split_list(lst: list, chunk_size: int):
+    """
+    将list进行按照chunk_size大小拆分
+    :param lst:
+    :param chunk_size:
+    :return:
+    """
+    assert len(lst)>0
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
 
 def gen_uuid():
     return str(uuid.uuid4())
+
+
+# 保存对象列表到文件
+async def save_to_file(obj_list: object, file_path: str) -> object:
+    with open(file_path, 'wb') as file:
+        pickle.dump(obj_list, file)
+
+
+# 从文件加载对象列表
+async def load_from_file(file_path: str):
+    with open(file_path, 'rb') as file:
+        obj_list = pickle.load(file)
+    return obj_list
+
+
+if __name__ == '__main__':
+    # 示例代码
+    pdf_meta_list = [1,2,3]  # 包含 PDFMetaInfoModel 类对象的列表
+
+    # 保存到文件
+    save_to_file(pdf_meta_list, 'pdf_meta_list.pkl')
+
+    # 从文件加载
+    loaded_pdf_meta_list = load_from_file('pdf_meta_list.pkl')
+    print(loaded_pdf_meta_list)
