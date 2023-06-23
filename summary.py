@@ -82,7 +82,7 @@ class SummaryData(BaseModel):
     summary_temp: str
 
 
-class TranslateDate(BaseModel):
+class TranslateData(BaseModel):
     user_type: str
     pdf_hash: str
     language: str

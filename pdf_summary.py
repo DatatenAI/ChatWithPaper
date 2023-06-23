@@ -579,7 +579,7 @@ async def translate_summary(text, lang: str) -> tuple:
     chat_paper_api.reset(
         convo_id=convo_id,
         system_prompt=
-        "You are a research scientist and you are translated the summary with concise language and keep the same format."
+        "You are a research scientist and you are translating the summary with concise language and keep the same format."
     )
     logger.info(f"input text:{text}")
     logger.info(f"origin text length:{len(text)}")
@@ -598,6 +598,39 @@ async def translate_summary(text, lang: str) -> tuple:
     logger.info("end get paper summary translation")
     return result[0], result[3]
 
+async def translate_one_field(text, lang: str, field: str) -> tuple:
+    logger.info(f"start translating {field}")
+    convo_id = f"translate_paper_{field}_{str(gen_uuid())}"
+
+    chat_paper_api.reset(
+        convo_id=convo_id,
+        system_prompt=
+        f"You are a research scientist and you are translating the {field} of a research paper with concise language and keep the same format."
+    )
+    logger.info(f"input text:{text}")
+    logger.info(f"origin text length:{len(text)}")
+    text = truncate_text(text)
+    logger.info(f"truncate_text length:{len(text)}")
+    content = f"""Original {field} is as follows: {text}, please translate it into {lang}. 
+    Remember to:
+    - Retain proper nouns in original language.
+    - Retain authors in original language.
+    """
+    result = await chat_paper_api.ask(prompt=content,
+                                      role="user",
+                                      convo_id=convo_id)
+    chat_paper_api.conversation[convo_id] = None
+    print_token(f"get_paper_{field}_translation", result)
+    logger.info(f"end get paper {field} translation")
+    return result[0], result[3]
+
+async def translate(texts: dict, lang: str) -> dict:
+    translated_texts = {}
+    for field, text in texts.items():
+        translated_text = await translate_one_field(text, lang, field)
+        translated_texts[field] = translated_text[0]
+
+    return translated_texts
 
 def truncate_text(text, max_token=2560, steps=None):
     if steps is None:
@@ -826,7 +859,7 @@ async def get_condensed_text(
 
 
 #############################################################################
-async def test_translate():
+async def test_translate_summary():
     text = """
     Recommender systems play a vital role in various online services.
 However, the insulated nature of training and deploying separately
@@ -852,6 +885,48 @@ KAR significantly outperforms the state-of-the-art baselines and is
 compatible with a wide range of recommendation algorithms.
     """
     res = await translate_summary(text=text, lang="中文")
+    print(res)
+
+async def test_translate_one_field():
+    # basic info
+    text_basic_info = """
+    # 基本信息:
+- 标题: 密集视频对象字幕生成与不连续监督
+- 作者: Xingyi Zhou, Anurag Arnab, Chen Sun, Cordelia Schmid
+- 机构: Google Research
+- 关键词: 密集视频对象字幕生成, 空间定位, 跟踪, 字幕
+- 链接: [论文](https://arxiv.org/ab...
+    """
+    res = await translate_one_field(text=text_basic_info, lang="English", field="basic info")
+    print(res)
+
+    # brief intro
+    text_brief_intro = """
+    这篇论文介绍了一项名为密集视频对象字幕的新任务，旨在在视频中检测、跟踪和字幕化对象的轨迹。作者提出了一个端到端的模型，包括空间定位、跟踪和字幕化模块。他们通过使用混合的不相交任务和多样化的数据集训练模型，实现了令人印象深刻的零样本性能。此外，作者还重新利用现有的视频定位数据集进行评估和领域特定的微调，证明了他们的模型在这些数据集上的空间定位方面优于最先进的模型。论文在图像字幕和图像中的密集对象字幕方面建立在先前的技术基础上，模型包括区域提议、端到端跟踪和字幕化模块。区域提议模块为每个帧生成无类别的区域提议，然后由跟踪模块将对象分组成轨迹，最后通过自回归语言解码器生成字幕。总的来说，该研究提出的模型在密集视频对象字幕任务上取得了显著的成果。
+    """
+    res = await translate_one_field(text=text_brief_intro, lang="English", field="basic info")
+    print(res)
+
+    # content
+    text_content = """
+    # 方法:
+- a. 理论背景:
+    - 本文介绍了一项名为密集视频对象字幕的新任务，涉及在视频中检测、跟踪和字幕化对象的轨迹。作者提出了一个端到端的模型，包括空间定位、跟踪和字幕化模块。他们强调了使用混合的不相交任务和多样化的数据集训练模型的好处，从而实现了令人印象深刻的零样本性能。作者还重新利用现有的视频定位数据集进行评估和领域特定的微调。他们证明了他们的模型在这些数据集上的空间定位方面优于最先进的模型。
+
+- b. 技术路线:
+    - 本文在图像字幕和图像中的密集对象字幕方面建立在先前的技术基础上。他们的模型包括区域提议、端到端跟踪和字幕化模块。区域提议模块为每个帧生成无类别的区域提议，然后由跟踪模块将对象分组成轨迹。得到的轨迹被输入到自回归语言解码器中进行字幕生成。作者描述了他们如何使用混合的不相交任务和数据集有效地训练他们的模型，包括COCO、Visual Genome和Spoken Moments in Time。他们还提到了重新利用现有的视频定位数据集进行评估和领域特定的微调。
+
+# 结果:
+- a. 详细的实验设置:
+    - 本文没有提供关于实验设置的具体细节。
+
+- b. 详细的实验结果: 
+    - 本文没有提供关于实验细节的具体细节。
+
+# Note:
+- 本总结源自于LLM的总结，请注意数据判别. Power by ChatPaper. End.
+    """
+    res = await translate_one_field(text=text_content, lang="English", field="basic info")
     print(res)
 
 
@@ -1214,7 +1289,8 @@ Zhao et al. 2023). In the MT community, metrics that evaluate translations at th
     print(res)
 
 if __name__ == '__main__':
-    # asyncio.run(test_translate())
+    # asyncio.run(test_translate_summary())
+    asyncio.run(translate_one_field())
     # asyncio.run(test_Extract_title())
 
     # 测试第一页
@@ -1242,6 +1318,6 @@ if __name__ == '__main__':
     # asyncio.run(test_conclude_first_page_information())
 
     # 测试全部总结
-    asyncio.run(test_get_the_formatted_summary_from_pdf())
+    # asyncio.run(test_get_the_formatted_summary_from_pdf())
 
     pass
