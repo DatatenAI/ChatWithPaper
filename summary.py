@@ -94,7 +94,7 @@ async def summary(summary_data: SummaryData) -> Union[Tuple, None]:
     pdf_path = os.path.join(PDF_SAVE_DIR, f"{file_hash}.pdf")
     if not Path(pdf_path).is_file():
         logger.error(f'file {file_hash}.pdf  not found')
-        raise f'file {file_hash}.pdf  not found'
+        raise ValueError('file {file_hash}.pdf  not found')
     try:
         # 选择模板
         if summary_temp == 'default':
@@ -112,7 +112,7 @@ async def summary(summary_data: SummaryData) -> Union[Tuple, None]:
         error_res = {"status": "error", "detail": str(e)}
         # Delete any previous wrong summary results associated with the summary_id
         delete_wrong_summary_res(file_hash, language, summary_temp)
-        raise json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
+        raise e
 
 
 async def process_summary(task_data):
@@ -130,19 +130,18 @@ async def process_summary(task_data):
         user_type=task_data['user_type'],
         pdf_hash=task_data['pdf_hash'],
         language=task_data['language'],
-        summary_temp=task_data['temp']
+        summary_temp=task_data['summary_temp']
     )
     pdf_path = os.path.join(PDF_SAVE_DIR, f'{pdf_hash}.pdf')
     try:
 
-        vec_task = get_embeddings_from_pdf(pdf_path, max_token=512)
+        vec_split_task = get_embeddings_from_pdf(pdf_path, max_token=512)
         summary_task = summary(summary_data=summary_data)
-        vec_data, res_data = await asyncio.gather(vec_task, summary_task)
+        vec_split_data, res_data = await asyncio.gather(vec_split_task, summary_task)
 
     except Exception as e:
         logger.error(f"generate summary error:{e}", )
         error_res = {"status": "error", "detail": str(e)}
-        str_error_res = json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
         # TODO 处理报错信息
         if user_type == 'spider':
             # TODO 写报错信息和改变状态
@@ -151,7 +150,7 @@ async def process_summary(task_data):
                                                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                                 ).where(
                 db.SubscribeTasks.pdf_hash == pdf_hash,
-                db.SubscribeTasks.type == task_data['type'],
+                db.SubscribeTasks.type == task_data['task_type'],
                 db.SubscribeTasks.language == task_data['language']).execute()
             logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
 
@@ -166,17 +165,16 @@ async def process_summary(task_data):
                 db.UserTasks.user_id == task_data['user_id'],
                 db.UserTasks.pdf_hash == pdf_hash,
                 db.UserTasks.language == task_data['language'],
-                db.UserTasks.type == task_data['type'],
+                db.UserTasks.type == task_data['task_type'],
             ).execute()
             logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
             # TODO 还钱
 
-
             logger.info(f"give back user {user_id}, points {pages}")
 
-        raise str_error_res
+        raise e
 
-    title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, token_cost_all = res_data
+    title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, pdf_vec, token_cost_all = res_data
 
     if user_type == 'spider':
         # TODO 将数据写入到SubscribeTasks任务表中和summaries表中
@@ -187,21 +185,30 @@ async def process_summary(task_data):
                                                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                                 ).where(
                 db.SubscribeTasks.pdf_hash == pdf_hash,
-                db.SubscribeTasks.type == task_data['type'],
+                db.SubscribeTasks.type == task_data['task_type'],
                 db.SubscribeTasks.language == task_data['language']).execute()
             logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
             # 添加进summaries
-            summary_obg = db.Summaries.create(
+            add_sum_data = {
+                "pdf_hash": pdf_hash,
+                "language": task_data['language'],
+                "title": title,
+                "title_zh": title_zh,
+                "basic_info": basic_info,
+                "brief_introduction": brief_intro,
+                "first_page_conclusion": firstpage_conclusion,
+                "content": summary_res,
+            }
+
+            obj, created_sum = db.Summaries.get_or_create(
                 pdf_hash=pdf_hash,
                 language=task_data['language'],
-                title=title,
-                title_zh=title_zh,
-                basic_info=basic_info,
-                brief_introduction=brief_intro,
-                first_page_conclusion=firstpage_conclusion,
-                content=summary_res,
+                defaults=add_sum_data
             )
-            logger.info(f"add summaries id={summary_obg}, pdf_hash={pdf_hash}")
+            if created_sum:
+                logger.info(f"add summaries id={obj}, pdf_hash={pdf_hash}, language={task_data['language']}")
+            else:
+                logger.info(f"update summaries id={obj}, pdf_hash={pdf_hash}")
         except Exception as e:
             logger.error(f"{e}")
 
@@ -221,7 +228,7 @@ async def process_summary(task_data):
                 db.UserTasks.user_id == task_data['user_id'],
                 db.UserTasks.pdf_hash == pdf_hash,
                 db.UserTasks.language == task_data['language'],
-                db.UserTasks.type == task_data['type'],
+                db.UserTasks.type == task_data['task_type'],
                 ).execute()
             logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
             # 添加进summaries

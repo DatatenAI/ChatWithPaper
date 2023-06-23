@@ -1,9 +1,8 @@
-import logging
 import os
 import pickle
 import uuid
 from typing import Union
-
+from loguru import logger
 import fitz
 import tiktoken
 
@@ -41,7 +40,7 @@ async def retry(tries: int, function, *args,
         try:
             return await function(*args, **kwargs)
         except Exception as e:
-            logging.info(f"attempt execute function error,tries: {attempt},error:{e}")
+            logger.info(f"attempt execute function error,tries: {attempt},error:{e}")
             continue
 
 def split_list(lst: list, chunk_size: int):
@@ -56,6 +55,10 @@ def split_list(lst: list, chunk_size: int):
 
 def gen_uuid():
     return str(uuid.uuid4())
+
+def print_token(tip, result):
+    logger.info(
+        f"{tip} prompt used: {str(result[1])} tokens. Completion used: {str(result[2])} tokens. Totally used: {str(result[3])} tokens.")
 
 
 # 保存对象列表到文件

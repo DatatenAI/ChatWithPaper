@@ -12,9 +12,11 @@ from dotenv import load_dotenv
 import time
 
 import api_key_db
+from modules.chatmodel.openai_chat import chat_paper_api
 from modules.fileactioins.filesplit import find_next_section, split_text
-from pdf_summary import chat_paper_api, print_token
-from modules.util import split_list, save_to_file, load_from_file
+
+
+from modules.util import split_list, save_to_file, load_from_file, print_token
 from modules.util import gen_uuid, retry
 
 if os.getenv('ENV') == 'DEV':

@@ -13,21 +13,14 @@ from loguru import logger
 # 开发测试
 from dotenv import load_dotenv
 
-from modules.fileactioins.filesplit import get_paper_split_res
-from modules.vectors.get_embeddings import embed_text
+from modules.chatmodel.openai_chat import chat_paper_api
 
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
-import optimize_openai
-from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file
-
-chat_paper_api = optimize_openai.ChatPaperAPI(
-    model_name="gpt-3.5-turbo-16k",
-    # model_name="gpt-3.5-turbo",
-    top_p=1,
-    temperature=0.0,
-    apiTimeInterval=0.02)
+from modules.vectors.get_embeddings import embed_text
+from modules.fileactioins.filesplit import get_paper_split_res
+from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token
 
 
 async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
@@ -234,6 +227,7 @@ async def get_the_formatted_summary_from_pdf(
 ) -> tuple:
     logger.info(f"start summary pdf,path:{pdf_file_path},language:{language}")
     base_path, ext = os.path.splitext(pdf_file_path)
+    pdf_hash = base_path.replace('\\', '/').split('/')[-1]
 
     first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
     format_path = f"{base_path}.formatted.{language}.{summary_temp}.txt"
@@ -242,7 +236,7 @@ async def get_the_formatted_summary_from_pdf(
     basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
     brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
     token_path = f"{base_path}.tokens.{language}.{summary_temp}.txt"
-    pdf_vec_path = f"{base_path}.vec.pkl"
+    pdf_vec_path = f"{os.getenv('FILE_PATH')}/out/{pdf_hash}.vec.pkl"
 
     token_cost_all = 0
     if not os.path.isfile(format_path):  # 如果不存在
@@ -298,8 +292,10 @@ async def get_the_formatted_summary_from_pdf(
         }, ensure_ascii=False, indent=4)
         if Path(pdf_vec_path).is_file():
             pdf_vec = await load_from_file(pdf_vec_path)
+            logger.info(f"load pdf vec:{pdf_vec_path}")
         else:
-            pdf_vec = await embed_text(meta_data)
+            pdf_vec, vec_tokens = await embed_text(meta_data)
+            token_cost_all += vec_tokens
         # 在这儿存最终的总结文本信息：
 
         # save file title_path
@@ -309,7 +305,7 @@ async def get_the_formatted_summary_from_pdf(
         await save_str_files(brief_intro, brief_intro_path)
         await save_str_files(final_res, format_path)
         await save_str_files(str(token_cost_all), token_path)
-        await save_to_file(pdf_vec, pdf_vec_path)    #  存储单篇文章的向量化内容
+        await save_to_file(pdf_vec, pdf_vec_path)  # 存储单篇文章的向量化内容
 
         # 扣费和写表逻辑
 
@@ -328,9 +324,23 @@ async def get_the_formatted_summary_from_pdf(
         firstpage_conclusion = await read_str_files(first_page_path)
         final_res = await read_str_files(format_path)
         token_cost_all = await read_str_files(token_path)
-        pdf_vec = await load_from_file(pdf_vec_path)
+        token_cost_all = int(0 if token_cost_all == '' else int(token_cost_all))
+        meta_data = json.dumps({
+            "title": title,
+            "title_zh": title_zh,
+            "basic_info": basic_info,
+            "brief_intro": brief_intro,
+            "summary": final_res
+        }, ensure_ascii=False, indent=4)
+        if Path(pdf_vec_path).is_file():
+            pdf_vec = await load_from_file(pdf_vec_path)
+            logger.info(f"load pdf vec:{pdf_vec_path}")
+        else:
+            pdf_vec, vec_tokens = await embed_text(meta_data)
+            await save_to_file(pdf_vec, pdf_vec_path)  # 存储单篇文章的向量化内容
+            token_cost_all += vec_tokens
 
-        token_cost_all = int(0 if token_cost_all=='' else int(token_cost_all))
+
         return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
 
 
@@ -371,7 +381,7 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
 async def rewrite_paper_and_extract_information(path: str, language: str) -> tuple:
     # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
-    sentences = await get_paper_split_res(path)
+    sentences = await get_paper_split_res(path, max_token=2048) # 基本翻了4倍
     if len(sentences) == 0:
         raise Exception("there is no text in the paper")
     sentences_length = len(sentences)
@@ -386,31 +396,22 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
     information_task = process_information(sentences[0], path, language=language)
 
     # 使用 asyncio.gather() 并行执行两个任务
-    results, information_result = await asyncio.gather(asyncio.gather(*sentence_tasks), information_task)
+    results, informations = await asyncio.gather(asyncio.gather(*sentence_tasks), information_task)
+    if information_task is None or results[0] is None:
+        logger.error(f"process_information error return None")
+        raise f"process_information error return None"
 
     # 解包获取每个任务的结果
-    sentence_results = results[0]
-    informations = information_result
-
-    # sentence_tasks = [process_sentence(sentence, sentences_length) for sentence in sentences]
-    # results = await asyncio.gather(*sentence_tasks)
-    # informations = await process_information(sentences[0], path, language=language)  # 第一页的信息
 
     rewrite_str = ""
     token_cost = 0
     for result in results:
         if isinstance(result, tuple):
-            rewrite_str += result[0]
+            rewrite_str += '\n' + result[0]
             token_cost += result[1]
     token_cost += informations[1]
     logger.info("end rewrite paper and extract")
     return rewrite_str, informations[0], token_cost
-
-
-
-
-
-
 
 
 async def get_paper_final_summary(text: str,
@@ -793,11 +794,6 @@ async def get_condensed_text(
     return str(result[0]), result[3]
 
 
-def print_token(tip, result):
-    logger.info(
-        f"{tip} prompt used: {str(result[1])} tokens. Completion used: {str(result[2])} tokens. Totally used: {str(result[3])} tokens.")
-
-
 #############################################################################
 async def test_translate():
     text = """
@@ -1088,6 +1084,7 @@ async def test_extract_basic():
     res = await From_FirstPage_Extract_BasicInfo(text, "中文")
     print(res)
 
+
 async def test_get_paper_split_res():
     pdf_path = '../uploads/0bf316e9c1daea38a8250c2201e42dfc.pdf'
 
@@ -1097,13 +1094,106 @@ async def test_get_paper_split_res():
     res = await get_paper_split_res(pdf_path, max_token=512)
     print(res)
 
-async def test_rewrite_paper_and_extract_information():
 
+async def test_rewrite_paper_and_extract_information():
+    pdf_path = '../uploads/6a2648f178c0c61f0b77e01473f85488.pdf'
+    language = '中文'
+    summary_temp = 'default'
+    if os.path.exists(pdf_path):
+        print("file exists")
+    else:
+        return None
+    res = await rewrite_paper_and_extract_information(pdf_path, language)
+    print(res)
     pass
+
+async def test_get_the_complete_summary():
+    pdf_path = '../uploads/6a2648f178c0c61f0b77e01473f85488.pdf'
+    language = '中文'
+    summary_temp = 'default'
+    if os.path.exists(pdf_path):
+        print("file exists")
+    else:
+        return None
+    res = await get_the_complete_summary(pdf_path,language)
+    print(res)
+
+async def test_get_condensed_text():
+    text = """
+    Towards Explainable Evaluation Metrics for Machine Translation
+Christoph Leiter1, Piyawat Lertvittayakumjorn2, Marina Fomicheva3,
+Wei Zhao4, Yang Gao5, Steffen Eger1 1Bielefeld University, 2Imperial College London, 3University of Sheffield 4Heidelberg Institute for Theoretical Studies, 5Royal Holloway, University of London
+Abstract
+Unlike classical lexical overlap metrics such as BLEU, most current evaluation metrics for machine translation (for example, COMET or BERTScore) are based on black-box large language models. They often achieve strong correlations with human judgments, but re- cent research indicates that the lower-quality classical metrics remain dominant, one of the potential reasons being that their decision processes are more transparent. To foster more widespread acceptance of novel high-quality metrics, explainability thus becomes crucial. In this concept paper, we identify key properties as well as key goals of explainable machine translation metrics and provide a comprehensive synthesis of recent techniques, relating them to our established goals and properties. In this context, we also discuss the latest state-of-the-art approaches to explainable metrics based on generative models such as Chat-
+GPT and GPT4. Finally, we contribute a vision of next-generation approaches, including natural language explanations. We hope that our work can help catalyze and guide future research on explainable evaluation metrics and, mediately, also contribute to better and more transparent machine translation systems.
+1
+Introduction
+The field of evaluation metrics for Natural Language Generation (NLG), especially machine translation (MT) is in a crisis (Marie et al. 2021).1 Despite the development of multiple high- quality evaluation metrics in recent years (Zhao et al. 2019; Zhang et al. 2020a; Rei et al.
+2020; Sellam et al. 2020; Yuan et al. 2021), the Natural Language Processing (NLP) community appears hesitant to adopt them for assessing NLG systems (Marie et al. 2021; Gehrmann et al.
+2023). Empirical investigations of Marie et al. (2021) indicate that the majority of MT papers relies on surface-level evaluation metrics such as BLEU and METEOR (Papineni et al. 2002;
+Banerjee and Lavie 2005), which were created two decades ago, a trend that may allegedly have worsened in recent times. These surface-level metrics cannot (even) measure semantic similarity of their inputs and are thus fundamentally flawed, particularly when it comes to assessing the quality of recent state-of-the-art MT systems (e.g. Peyrard 2019; Freitag et al. 2022), raising concerns about the credibility of the scientific field. We argue that the potential reasons for this neglect of recent high-quality metrics include: (i) non-enforcement by reviewers; (ii) easier comparison to previous research, for example, by copying BLEU-based results from tables of related work (potentially a pitfall in itself); (iii) computational inefficiency to run expensive new metrics at large scale; (iv) lack of trust in and transparency of high-quality black box metrics.
+In this work, we concern ourselves with the last-named reason, and address the explainability of such metrics.
+1We published an earlier version of this paper (Leiter et al. 2022a) under a different title. Both versions consider the conceptualization of explainable metrics and are overall similar. However, while the old version contains several novel experiments, this new version puts a stronger emphasis on the survey of approaches for the explanation of MT metrics including the latest LLM based approaches. For example, this comprises techniques that return fine-grained error labels or natural language explanations.
+1 arXiv:2306.13041v1  [cs.CL]  22 Jun 2023
+In recent years, explainability has become a crucial research area in AI due to its potential benefits for users, designers, and developers of AI systems (Samek et al. 2018; Vaughan and
+Wallach 2021).2
+For users of the AI systems, explanations help them make more informed decisions (es- pecially in high-stake domains) (Sachan et al. 2020; Lertvittayakumjorn et al. 2021), better understand and hence gain trust of the AI systems (Pu and Chen 2006; Toreini et al. 2020), and even learn from the AI systems to accomplish tasks more successfully (Mac Aodha et al. 2018;
+Lai et al. 2020). For AI system designers and developers, explanations allow them to identify the problems and weaknesses of the systems (Krause et al. 2016; Han et al. 2020), calibrate the confidence of the systems (Zhang et al. 2020b), and improve them accordingly (Kulesza et al.
+2015; Lertvittayakumjorn and Toni 2021).
+Explainability is particularly desirable for evaluation metrics.
+Sai et al. (2022) suggest that explainable NLG metrics should focus on providing more information than just a single score (such as fluency or adequacy). Celikyilmaz et al. (2020) stress the need for explainable evaluation metrics to spot system quality issues and to achieve a higher trust in the evaluation of NLG systems. Explanations indeed play a vital role in building trust for new evaluation metrics.3 For instance, one potential reason that a metric will likely be better accepted by the research community is if the explanations of the scores align well with human reasoning and faithfully reflect its internal decision process (see §2.2).
+By contrast, if faithfulness is given and the explanations are counter-intuitive, users and developers might lower their trust and be alerted to take additional actions, such as trying to improve the metrics using insights from the explanations or looking for alternative metrics that are more trustworthy. Furthermore, explainable metrics can be used for other purposes: for example, when a metric produces a low score for a given input, highlighted words (a widely used method for explanation, see §4) in the input are natural candidates for manual post-editing.
+This concept paper aims at providing a systematic overview of the existing efforts in ex- plainable MT evaluation metrics and an outlook for promising future research directions. The main focus of this work lies on explainable evaluation metrics for MT, many of our observations and discussions can likely be adapted to other NLG tasks, however.
+We make the following contributions, outlined by the structure of our paper: §2 Background & Terminology: We give an overview of concepts important for explain- able MT evaluation. We also highlight different goals and the audiences that require them.
+§4 Taxonomy: We provide a structured overview of previous efforts in explainable MT evaluation. An overview is shown in Figure 4. The process of selecting works for this taxonomy is described in §3 Literature Review & Selection.
+§5 Future Work: An analysis of underexplored research directions , and a collection of exemplary methods from other NLP domains to illustrate potential future paths. Here, we also discuss the usage of large language models (LLMs), like ChatGPT (OpenAI 2023b) and GPT4 (OpenAI 2023a).
+We provide an overview of Related Work in §6 and a Conclusion in §7.
+2As of now, there is no universally accepted definition of explainability in the AI community. In this work, we adapt the definition by Barredo Arrieta et al. (2020), which we discuss in §2.2.
+3As an illustrating example, Moosavi et al. (2021) distrust using the metric BERTScore (Zhang et al. 2020a) applied to a novel text generation task, as it assigns a score of 0.74 to a nonsensical output, which could be taken as an unreasonably high value. While BERTScore may indeed be unsuitable for their novel task, the score of 0.74 is meaningless here, as evaluation metrics may have arbitrary ranges. In fact, BERTScore typically has a particularly narrow range, so a score of 0.74 even for bad outputs may not be surprising (BERTScore provides a scaling method that solves these issues to some degree). Explainability techniques would be very helpful in preventing such misunderstandings, e.g. by showing that the features BERTScore attends to align with human judgement.
+2
+With this work, we aim to solidify the field of explainable MT metrics and provide guidance for researchers, in specific metric developers, who aim to better understand and explain MT metrics, as well as users that want to employ explainability techniques to explain metric outputs.
+In the long term, we envision that our work will aid the development of improved MT metrics and thereby help to improve the quality of machine translations. Potentially, explanations can also aid other use cases such as translation selection and semi-automatic labeling (see §2.3). We also hope that our work will more generally inspire explainable NLG metric design.
+2
+Background & Terminology
+In this section, we first introduce and relate definitions and dimensions of MT metrics and explainability, which we use in the later parts of the paper. Further, we collect goals and target audiences of explainable MT metrics.
+2.1
+Machine Translation Evaluation Metrics
+MT metrics grade machine translated content, the hypothesis, based on ground truth data. We differentiate these metrics along several dimensions. A summary is shown in Table 1. We note that metrics can be categorized along many dimensions (e.g. Sai et al. 2022; Celikyilmaz et al.
+2020). Here, we focus on a minimal specification that we will leverage later. Some parts of this section refer to explainability (see definitions in §2.2).
+Dimension
+Description
+Input type
+Whether source, reference translation or both are used as ground truth for comparison
+Granularity
+At which level a metric operates: Word-level, sentence-level, document- level
+Quality aspect
+What a metric measures: Adequacy, fluency, etc.
+Learning objective
+How a metric is induced: Regression, ranking, etc.
+Table 1: A typology of categorizations for evaluation metrics.
+Input type
+We call a metric reference-based if it requires one or multiple human reference translations to compare with the hypothesis as ground truth, which can be seen as a form of supervision (e.g. Papineni et al. 2002; Zhao et al. 2019; Rei et al. 2022a). Reference-free metrics do not require a reference translation to grade the hypothesis (e.g. Zhao et al. 2020;
+Ranasinghe et al. 2020b; Belouadi and Eger 2023). Instead, they directly compare the source to the hypothesis. In the literature, reference-free MT evaluation is sometimes also referred to as “reference-less” (e.g. Mathur et al. 2020) or “quality estimation” (e.g. Zerva et al. 2022). This dimension is important for explainable MT evaluation, as explainability techniques might need to consider which resources are available.
+Granularity
+Translation quality can be evaluated at different levels of granularity: word-level, sentence-level and document-level. The majority of metrics for MT return a single sentence-level score for each input sentence (e.g. Zhao et al. 2019; Zhang et al. 2020a). Beyond individual sentences, a metric may also score whole documents (multiple sentences) (Jiang et al. 2022;
+Zhao et al. 2023). In the MT community, metrics that evaluate translations at the word-level (for example, whether individual words are correct or not) are also common (Turchi et al.
+2014; Shenoy et al. 2021). Recently, there has been a tendency to compare metrics to human scores derived from fine-grained error annotations — multidimensional quality metrics (MQM) 3 (Lommel et al. 2014) — as they tend to correspond better to human professional translators (Freitag et al. 2021a). Metrics of higher granularity (e.g. word-level) provide more explanatory value than those of lower granularity, as they provide more details on which parts of the input might be translated incorrectly (e.g. Leiter 2021; Fomicheva et al. 2021, 2022). Most techniques we describe in §4 target the explainability of sentence-level metrics.
+    """
+    res = await get_condensed_text(text,3)
+    print(res)
 
 if __name__ == '__main__':
     # asyncio.run(test_translate())
     # asyncio.run(test_Extract_title())
+
+    # 测试第一页
+    # asyncio.run(test_get_the_complete_summary())
+
+    #
+    # asyncio.run(test_rewrite_paper_and_extract_information())
+
+    # 测试压缩信息
+    # asyncio.run(test_get_condensed_text())
 
     # 测试拆分
     # asyncio.run(test_get_paper_split_res())

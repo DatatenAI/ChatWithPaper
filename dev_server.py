@@ -3,6 +3,10 @@ import json
 import threading
 from loguru import logger
 from pydantic import BaseModel, Field, validator
+
+current_script_directory = os.path.dirname(os.path.abspath(__file__))
+logger.info(f"work path:{current_script_directory}")
+
 from dotenv import load_dotenv
 load_dotenv()
 import db
@@ -42,7 +46,8 @@ async def invoke(params: Request):
             "language": task.language,
             "user_id": task.user_id,
             "pages": task.pages,
-            "pdf_hash": task.pdf_hash
+            "pdf_hash": task.pdf_hash,
+            "summary_temp": 'default'
         }, ensure_ascii=False)
         threading.Thread(target=handler, args=(dumps,)).start()
         return 'success'
@@ -53,12 +58,14 @@ async def invoke(params: Request):
         if task.type.lower() == 'summary':  # 总结的任务
             logger.info("begin spider summary")
             dumps = json.dumps({
+                "user_id": 'chat-paper',
                 "user_type": user_type,
                 "task_id": task_id,
                 "task_type": task.type,
                 "language": task.language,
                 "pages": task.pages,
-                "pdf_hash": task.pdf_hash
+                "pdf_hash": task.pdf_hash,
+                "summary_temp": 'default'   # 总结模板
             }, ensure_ascii=False)
             threading.Thread(target=handler, args=(dumps,), daemon=True).start()
             return 'success'
