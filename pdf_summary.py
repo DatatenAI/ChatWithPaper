@@ -18,7 +18,7 @@ from modules.chatmodel.openai_chat import chat_paper_api
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
-from modules.vectors.get_embeddings import embed_text
+from modules.vectors.get_embeddings import embed_text, From_ChunkText_Get_Questions
 from modules.fileactioins.filesplit import get_paper_split_res
 from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token
 
@@ -220,6 +220,7 @@ async def save_str_files(file_data: str, file_path: str):
         await f.write(file_data)
 
 
+
 async def get_the_formatted_summary_from_pdf(
         pdf_file_path: str,
         language: str = "Chinese",
@@ -282,18 +283,23 @@ async def get_the_formatted_summary_from_pdf(
         final_res = re.sub(r'\\+n', '\n', summary_res)
         title_zh = re.sub(r'\\+n', '\n', title_zh)
 
-        # 向量化
-        meta_data = json.dumps({
-            "title": title,
-            "title_zh": title_zh,
-            "basic_info": basic_info,
-            "brief_intro": brief_intro,
-            "summary": summary_res
-        }, ensure_ascii=False, indent=4)
+
         if Path(pdf_vec_path).is_file():
             pdf_vec = await load_from_file(pdf_vec_path)
             logger.info(f"load pdf vec:{pdf_vec_path}")
         else:
+            # 向量化
+            # 对这篇文章可能问的问题
+            problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
+            token_cost_all += problem_tokens
+            meta_data = json.dumps({
+                "title": title,
+                "title_zh": title_zh,
+                "basic_info": basic_info,
+                "brief_intro": brief_intro,
+                "summary": summary_res,
+                "problem_to_ask": problem_to_ask
+            }, ensure_ascii=False, indent=4)
             pdf_vec, vec_tokens = await embed_text(meta_data)
             token_cost_all += vec_tokens
         # 在这儿存最终的总结文本信息：

@@ -210,8 +210,8 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
             pdf_models.append(pdf_model)
         last_page = page_cnt
 
-    # TODO 提取问题，结构化文本，转换成向量
-    # TODO 将文本，页数放在类中，然后返回list,再拆分进线程中进行结构化+向量处理
+    # 提取问题，结构化文本，转换成向量
+    # 将文本，页数放在类中，然后返回list,再拆分进线程中进行结构化+向量处理
 
     # 拆分chunks
     if len(pdf_models) < 20:

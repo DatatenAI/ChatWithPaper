@@ -6,7 +6,7 @@ mysql的表名和collection_name一致
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 
-collection_name = "PaperDocVector"
+collection_name = "SinglePaperDocVector"
 partition_name = "SinglePapers"
 
 paper_id = FieldSchema(
