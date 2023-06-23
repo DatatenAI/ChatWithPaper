@@ -50,7 +50,6 @@ schema = CollectionSchema(
 )
 
 
-
 index_param = {
     "metric_type": "IP",
     "index_type": "IVF_FLAT",
@@ -63,9 +62,11 @@ async def test_insert_data():
     from dotenv import load_dotenv
     load_dotenv()
 
-    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9_structure'
+    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
     structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
     flat_results_json = await load_data_from_json(structure_path)
+    print(flat_results_json[0])
+    # for res in flat_results_json:
 
     pass
 

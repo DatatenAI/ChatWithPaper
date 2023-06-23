@@ -27,13 +27,9 @@ paper_hash = FieldSchema(
     description='hash value of the pdf file'
 )
 
-paper_sql_id = FieldSchema(
-    name="sql_id",
-    dtype=DataType.INT64,
-    description="index id in the mysql database"
-)
+
 schema = CollectionSchema(
-    fields=[paper_id, paper_vector, paper_hash, paper_sql_id],
+    fields=[paper_id, paper_vector, paper_hash],
     description="Paper Vector Database"
 )
 
