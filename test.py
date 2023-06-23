@@ -6,7 +6,7 @@ if os.getenv('ENV') == 'DEV':
 
 from summary import delete_wrong_summary_res
 
-basic_info="""
+basic_info = """
 # Basic Information:
 
 - Title: Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware (低成本硬件学习细粒度双手操作)

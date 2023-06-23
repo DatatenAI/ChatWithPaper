@@ -42,20 +42,24 @@ def delete_wrong_file(file_path: str, file_size: int = None):
         return False
 
 
-def delete_wrong_summary_res(file_hash: str, language: str, summary_temp: str):
+def delete_wrong_summary_res(pdf_hash: str, language: str, summary_temp: str):
     """
     :param language: 语言
     :summary_temp: 总结模板
     """
-    base_path = os.path.join(PDF_SAVE_DIR, file_hash)
+    base_path = os.path.join(PDF_SAVE_DIR, pdf_hash)
     complete_path = f"{base_path}.complete.{language}.{summary_temp}.txt"  #
     format_path = f"{base_path}.formated.{language}.{summary_temp}.txt"
     first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"  #
     basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
     brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
+    pdf_vec_path = f"{os.getenv('FILE_PATH')}/out/{pdf_hash}.json"
 
     if Path(first_page_path).is_file():  # 文件小于等于100字节
         delete_wrong_file(first_page_path, file_size=100)
+        delete_wrong_file(structure_path, file_size=1000)
+        delete_wrong_file(pdf_vec_path, file_size=100)
     if Path(complete_path).is_file():
         delete_wrong_file(complete_path, 1000)
     if Path(format_path).is_file():
@@ -64,6 +68,8 @@ def delete_wrong_summary_res(file_hash: str, language: str, summary_temp: str):
         delete_wrong_file(basic_info_path, 100)
     if Path(brief_intro_path).is_file():
         delete_wrong_file(brief_intro_path, 100)
+
+
 
 
 from pydantic import BaseModel
@@ -169,6 +175,15 @@ async def process_summary(task_data):
             ).execute()
             logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
             # TODO 还钱
+            # 从tasks得到user_id查 accounts表的
+            credit_history_info = {
+
+            }
+
+            user_info = {
+
+            }
+
 
             logger.info(f"give back user {user_id}, points {pages}")
 
@@ -209,6 +224,9 @@ async def process_summary(task_data):
                 logger.info(f"add summaries id={obj}, pdf_hash={pdf_hash}, language={task_data['language']}")
             else:
                 logger.info(f"update summaries id={obj}, pdf_hash={pdf_hash}")
+
+            # 添加进向量数据库中
+
         except Exception as e:
             logger.error(f"{e}")
 

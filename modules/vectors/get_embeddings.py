@@ -16,7 +16,7 @@ from modules.chatmodel.openai_chat import chat_paper_api
 from modules.fileactioins.filesplit import find_next_section, split_text
 
 
-from modules.util import split_list, save_to_file, load_from_file, print_token
+from modules.util import split_list, save_to_file, load_from_file, print_token, save_data_to_json, load_data_from_json
 from modules.util import gen_uuid, retry
 
 if os.getenv('ENV') == 'DEV':
@@ -126,6 +126,7 @@ class PDFMetaInfoModel(BaseModel):
     """
     存储PDF拆分的基本信息结构
     """
+    id: Union[int, None]
     structure_info: Union[str, None]  # 结构化的信息
     text: Union[str, None]  # 原文文本
     vector: Union[list[float], None]  # 向量
@@ -175,11 +176,26 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
     infos = []
     metadatas = []
     pdf_hash = path.split('/')[-1].split('.')[0]
-    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.pkl")
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
+
     if os.path.exists(structure_path):  # 如果index存在
-        flat_results = await load_from_file(structure_path)
-        info_token_cost = sum(pdf_meta.tokens for pdf_meta in flat_results)
+        flat_results_json = await load_data_from_json(structure_path)
+        flat_results = []
+        info_token_cost = 0
+        for res in flat_results_json:
+            pdf_model = PDFMetaInfoModel()
+            pdf_model.id = res['id']
+            pdf_model.page = res['page']
+            pdf_model.structure_info = res['structure_info']
+            pdf_model.vector = res['vectors']
+            pdf_model.tokens = res['tokens']
+            pdf_model.text = res['text']
+            flat_results.append(pdf_model)
+            info_token_cost += pdf_model.tokens
+        logger.info(f"load embeddings from {structure_path}")
         return flat_results, info_token_cost
+
+
     if not os.path.exists(path):
         raise FileNotFoundError(f"File {path} not found")
     full_text = ""
@@ -214,23 +230,42 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
     # 将文本，页数放在类中，然后返回list,再拆分进线程中进行结构化+向量处理
 
     # 拆分chunks
-    if len(pdf_models) < 20:
+    if len(pdf_models) < 30:
         num_chunks = len(pdf_models)
     else:
-        num_chunks = int(len(pdf_models) / 20)
+        num_chunks = int(len(pdf_models) / 30)
 
     split_pdf_models = split_list(pdf_models, num_chunks)
 
     pdf_info_tasks = [process_pdf_infos(sentence, language='English') for sentence in split_pdf_models]
     results = await asyncio.gather(*pdf_info_tasks)
-    flat_results = list(itertools.chain(*results))
-    flat_results = list(filter(None.__ne__, flat_results))  # 过滤掉None
+    flat_results_raw = list(itertools.chain(*results))
+    flat_results_raw = [result for result in flat_results_raw if result is not None]  # 过滤掉None
+    flat_results = []
+    flag = 0
+    for res in flat_results_raw:
+        res.id = flag
+        flag += 1
+        flat_results.append(res)
 
     info_token_cost = sum(pdf_meta.tokens for pdf_meta in flat_results)
     logger.info(f"Info Token cost: {info_token_cost}")
     logger.info(f"Info length: {len(flat_results)}")
     try:
-        await save_to_file(flat_results, file_path=structure_path)
+        # 将list中多个数据存储到json到
+        flat_results_json = []
+        for res in flat_results:
+            flat_results_info = {
+                "id": res.id,
+                "page": res.page,
+                "structure_info": res.structure_info,
+                "vectors": res.vector,
+                "text": res.text,
+                "tokens": res.tokens,
+            }
+            flat_results_json.append(flat_results_info)
+
+        await save_data_to_json(flat_results_json, structure_path)
     except Exception as e:
         logger.error(f"save {pdf_hash}_structure.pkl fail {e}")
 

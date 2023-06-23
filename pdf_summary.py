@@ -20,7 +20,8 @@ if os.getenv('ENV') == 'DEV':
 
 from modules.vectors.get_embeddings import embed_text, From_ChunkText_Get_Questions
 from modules.fileactioins.filesplit import get_paper_split_res
-from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token
+from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token, save_data_to_json, \
+    load_data_from_json
 
 
 async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
@@ -237,7 +238,7 @@ async def get_the_formatted_summary_from_pdf(
     basic_info_path = f"{base_path}.basic_info.{language}.{summary_temp}.txt"
     brief_intro_path = f"{base_path}.brief.{language}.{summary_temp}.txt"
     token_path = f"{base_path}.tokens.{language}.{summary_temp}.txt"
-    pdf_vec_path = f"{os.getenv('FILE_PATH')}/out/{pdf_hash}.vec.pkl"
+    pdf_vec_path = f"{os.getenv('FILE_PATH')}/out/{pdf_hash}.json"
 
     token_cost_all = 0
     if not os.path.isfile(format_path):  # 如果不存在
@@ -285,7 +286,10 @@ async def get_the_formatted_summary_from_pdf(
 
 
         if Path(pdf_vec_path).is_file():
-            pdf_vec = await load_from_file(pdf_vec_path)
+            pdf_vec_data = await load_data_from_json(pdf_vec_path)
+            pdf_vec = pdf_vec_data['vectors']
+            vec_tokens = pdf_vec_data['tokens']
+            token_cost_all += vec_tokens
             logger.info(f"load pdf vec:{pdf_vec_path}")
         else:
             # 向量化
@@ -297,11 +301,19 @@ async def get_the_formatted_summary_from_pdf(
                 "title_zh": title_zh,
                 "basic_info": basic_info,
                 "brief_intro": brief_intro,
-                "summary": summary_res,
+                "summary": final_res,
                 "problem_to_ask": problem_to_ask
             }, ensure_ascii=False, indent=4)
             pdf_vec, vec_tokens = await embed_text(meta_data)
             token_cost_all += vec_tokens
+            # 存入json文件中
+            pdf_vec_info = {
+                "pdf_hash": pdf_hash,
+                "vectors": pdf_vec,
+                "problem_to_ask": problem_to_ask,
+                "tokens": vec_tokens
+            }
+            await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
         # 在这儿存最终的总结文本信息：
 
         # save file title_path
@@ -311,9 +323,6 @@ async def get_the_formatted_summary_from_pdf(
         await save_str_files(brief_intro, brief_intro_path)
         await save_str_files(final_res, format_path)
         await save_str_files(str(token_cost_all), token_path)
-        await save_to_file(pdf_vec, pdf_vec_path)  # 存储单篇文章的向量化内容
-
-        # 扣费和写表逻辑
 
         return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
 
@@ -331,20 +340,36 @@ async def get_the_formatted_summary_from_pdf(
         final_res = await read_str_files(format_path)
         token_cost_all = await read_str_files(token_path)
         token_cost_all = int(0 if token_cost_all == '' else int(token_cost_all))
-        meta_data = json.dumps({
-            "title": title,
-            "title_zh": title_zh,
-            "basic_info": basic_info,
-            "brief_intro": brief_intro,
-            "summary": final_res
-        }, ensure_ascii=False, indent=4)
+
         if Path(pdf_vec_path).is_file():
-            pdf_vec = await load_from_file(pdf_vec_path)
+            pdf_vec_data = await load_data_from_json(pdf_vec_path)
+            pdf_vec = pdf_vec_data['vectors']
+            vec_tokens = pdf_vec_data['tokens']
+            token_cost_all += vec_tokens
             logger.info(f"load pdf vec:{pdf_vec_path}")
         else:
+            # 向量化
+            # 对这篇文章可能问的问题
+            problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
+            token_cost_all += problem_tokens
+            meta_data = json.dumps({
+                "title": title,
+                "title_zh": title_zh,
+                "basic_info": basic_info,
+                "brief_intro": brief_intro,
+                "summary": final_res,
+                "problem_to_ask": problem_to_ask
+            }, ensure_ascii=False, indent=4)
             pdf_vec, vec_tokens = await embed_text(meta_data)
-            await save_to_file(pdf_vec, pdf_vec_path)  # 存储单篇文章的向量化内容
             token_cost_all += vec_tokens
+            # 存入json文件中
+            pdf_vec_info = {
+                "pdf_hash": pdf_hash,
+                "vectors": pdf_vec,
+                "problem_to_ask": problem_to_ask,
+                "tokens": vec_tokens
+            }
+            await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
 
 
         return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all

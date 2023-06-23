@@ -1,3 +1,4 @@
+import json
 import os
 import pickle
 import uuid
@@ -73,6 +74,41 @@ async def load_from_file(file_path: str):
         obj_list = pickle.load(file)
     return obj_list
 
+
+async def save_data_to_json(data, filename):
+    try:
+        if os.path.exists(filename):
+            raise FileExistsError(f"File '{filename}' already exists.")
+
+        json_data = json.dumps(data, indent=4)
+
+        with open(filename, 'w') as file:
+            file.write(json_data)
+
+        print(f"Data saved to '{filename}' successfully.")
+    except ValueError as e:
+        print(f"Error occurred while saving data: {str(e)}")
+    except Exception as e:
+        print(f"Error occurred while saving data: {str(e)}")
+
+
+async def load_data_from_json(filename):
+    try:
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f"File '{filename}' does not exist.")
+
+        with open(filename, 'r') as file:
+            data = file.read()
+
+        try:
+            json_data = json.loads(data)
+        except json.JSONDecodeError as e:
+            raise ValueError("Invalid JSON data format.") from e
+
+        return json_data
+    except Exception as e:
+        print(f"Error occurred while loading data: {str(e)}")
+        return None
 
 if __name__ == '__main__':
     # 示例代码

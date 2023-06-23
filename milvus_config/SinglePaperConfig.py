@@ -3,23 +3,28 @@ Paper筛选总结后的向量建表Field
 mysql的表名和collection_name一致
 """
 
+
 from pymilvus import CollectionSchema, FieldSchema, DataType
+
 
 
 collection_name = "SinglePaperDocVector"
 partition_name = "SinglePapers"
+field_name = "chunk_vector"
 
 paper_id = FieldSchema(
-    name="doc_id",
+    name="paper_id",
     dtype=DataType.INT64,
     is_primary=True,
 )
-paper_vector = FieldSchema(
-    name="summary_vector",
+
+chunk_vector = FieldSchema(
+    name=field_name,
     dtype=DataType.FLOAT_VECTOR,
     dim=1536,
-    description='vector representation of the summary'
+    description='chunk ector representation of the chunk text'
 )
+
 paper_hash = FieldSchema(
     name="pdf_hash",
     dtype=DataType.VARCHAR,
@@ -27,17 +32,24 @@ paper_hash = FieldSchema(
     description='hash value of the pdf file'
 )
 
-paper_sql_id = FieldSchema(
-    name="sql_id",
+chunk_id = FieldSchema(
+    name="chunk_id",
     dtype=DataType.INT64,
-    description="index id in the mysql database"
+    description="chunk id of the json file"
 )
+
+page = FieldSchema(
+    name="page",
+    dtype=DataType.INT64,
+    description="page number in the files"
+)
+
 schema = CollectionSchema(
-    fields=[paper_id, paper_vector, paper_hash, paper_sql_id],
+    fields=[paper_id, chunk_vector, paper_hash, chunk_id, page],
     description="Paper Vector Database"
 )
 
-field_name = "summary_vector"
+
 
 index_param = {
     "metric_type": "IP",
@@ -45,6 +57,53 @@ index_param = {
     "params": {"nlist": 1024}
 }
 
-if __name__ == "__main__":
+async def test_insert_data():
+    from modules.util import load_data_from_json
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
 
-    print(schema)
+    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9_structure'
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
+    flat_results_json = await load_data_from_json(structure_path)
+
+    pass
+
+if __name__ == "__main__":
+    from pymilvus import connections
+    from pymilvus import utility
+    from pymilvus import utility, Collection
+    from pymilvus import CollectionSchema, FieldSchema, DataType
+    import asyncio
+
+    connections.connect(
+        alias='default',
+        user='root',
+        # password='MilvusChatPaper@123',
+        password='test',
+        host='121.37.21.153',
+        port='19530'
+    )
+
+    if utility.has_collection(collection_name):
+        utility.drop_collection(collection_name)
+    print(f"collection_name: {collection_name},{utility.has_collection(collection_name)}")
+
+    collection = Collection(
+        name=collection_name,
+        schema=schema,
+        using='default',
+        shards_num=2  # 集合中分片数量
+    )
+    partition = collection.create_partition(partition_name=partition_name)
+
+    print(collection.partitions)
+
+    collection.create_index(field_name="chunk_vector", index_params=index_param)
+    print(collection.index().params)
+
+    asyncio.run(test_insert_data())
+    # test insert data
+
+
+

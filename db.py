@@ -40,6 +40,42 @@ class User(BaseModel):
     class Meta:
         table_name = 'usersNew'
 
+class Accounts(BaseModelNew):
+    id = AutoField()
+    user_id = CharField()
+    provider = CharField()
+    provider_account_id = CharField()
+    refresh_token = CharField()
+    access_token = TextField()
+    expires_at = IntegerField()
+    token_type = CharField()
+    scope = CharField()
+    id_token = TextField()
+    session_state = CharField()
+    type = CharField(choices=("oauth", "email", "credentials"))
+    class Meta:
+        table_name = 'accounts'
+
+class Users(BaseModelNew):
+    id = AutoField()
+    name = CharField()
+    email = CharField()
+    email_verified = DateTimeField()
+    image = CharField()
+    password = CharField()
+    credit = FloatField()
+    class Meta:
+        table_name = 'users'
+
+class CreditHistories(BaseModelNew):
+    id = AutoField()
+    user_id = CharField()
+    amount = FloatField()
+    type = CharField(choices=('SIGN', 'PURCHASE', 'TASK'))
+    happendAt = DateTimeField(default=datetime.datetime.now)
+    class Meta:
+        table_name = 'credit_histories'
+
 
 class UserToken(BaseModel):
     id = AutoField()
