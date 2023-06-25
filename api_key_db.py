@@ -11,8 +11,8 @@ import numpy as np
 
 
 
-def update_api_key_is_alive(api_key: str, is_alive: bool):
-    db.ApiKey.update(is_alive=is_alive).where(db.ApiKey.apikey == api_key).execute()
+def update_api_key_is_alive(key: str, alive: bool):
+    db.ApiKey.update(alive=alive).where(db.ApiKey.key == key).execute()
 
 
 def get_index_by_probability(probs):
@@ -27,10 +27,10 @@ def get_single_alive_key() -> Union[str, None]:
     try:
         # query_api_key = db.ApiKey.select().order_by(db.ApiKey.consumption.asc()).where(
         #     db.ApiKey.is_alive == True).first()
-        query_api_keys = db.ApiKey.select().order_by(db.ApiKey.consumption.asc()).where(
-            db.ApiKey.is_alive == True)
-        keys = [apiKey.apikey for apiKey in query_api_keys]
-        key_res = [apiKey.total_amount - apiKey.consumption for apiKey in query_api_keys]
+        query_api_keys = db.ApiKey.select().order_by(db.ApiKey.used.asc()).where(
+            db.ApiKey.alive == True)
+        keys = [apiKey.key for apiKey in query_api_keys]
+        key_res = [apiKey.amount - apiKey.used for apiKey in query_api_keys]
         index = get_index_by_probability(key_res)
         key = keys[index]
         logger.info(f"get single api key: {key}")

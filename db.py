@@ -89,13 +89,13 @@ class UserToken(BaseModel):
 
 class ApiKey(BaseModel):
     id = AutoField()
-    apikey = CharField(unique=True)
-    is_alive = BooleanField()
-    total_amount = DoubleField()
-    consumption = DoubleField()
+    key = CharField(unique=True)
+    alive = BooleanField()
+    amount = DoubleField()
+    used = DoubleField()
 
     class Meta:
-        table_name = 'apikeys'
+        table_name = 'api_keys'
 
 
 class ChatPaper(BaseModel):
