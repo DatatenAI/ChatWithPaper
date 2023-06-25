@@ -80,7 +80,7 @@ async def test_insert_data(coll):
         chunk_ids.append(res['id'])
         hashs.append(pdf_hash)
         pages.append(res['page'])
-    insert_data = [ids, vecs, chunk_ids, hashs, pages]
+    insert_data = [ids, vecs, hashs, chunk_ids, pages]
     res = coll.insert(data=insert_data, partition_name=partition_name, _async=True)
     coll.flush()
     print(res)
