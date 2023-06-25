@@ -6,43 +6,19 @@ import db
 from loguru import logger
 
 
-
 async def update_points_add(user_id: str,
-                                 points_consumed: float,
-                                 consumed_type: str):
-    """
-    消耗点数，消耗时候 points_consumed 是负，返回时候是正
-    """
-    lock_name = "consumed_points:" + user_id
-    lock = await redis_manager.acquire_lock(lock_name)
-    if not lock:
-        raise Exception("Too many requests")
-
+                            points_consumed: float,
+                            consumed_type: str):
     try:
-        # 增加credit值
-        user = db.Users.get(db.Users.id == user_id)
-        if not user:
-            logger.error(f"User: {user_id}, not found")
-            raise Exception("User not found")
-        if points_consumed > user.credit:
-            logger.error(f"point paid consumption exceeded, user_id:{user_id}"
-                         f"points_consumed:{points_consumed},"
-                         f"user credits:{user.credit}")
-        user.credit += points_consumed
-        user.save()
-        logger.info(f"user:{user_id} consumed points {points_consumed}")
-        # 增加历史记录
-        db.CreditHistories.create(user_id=user_id,
-                                  amount=points_consumed,
-                                  type=consumed_type)
-        logger.info(f"add user:{user_id} credit history, type:{consumed_type},points:{points_consumed}")
+        with db.mysql_db_new.atomic():
+            db.Users.update(credits=db.Users.credits + points_consumed).where(db.Users.id == user_id).execute()
+            logger.info(f"user:{user_id} consumed points {points_consumed}")
+            db.CreditHistories.create(user_id=user_id,
+                                      amount=points_consumed,
+                                      type=consumed_type)
     except Exception as e:
         logger.error(f"update points ")
         raise Exception(e)
-    finally:
-        await redis_manager.release_lock(lock_name, lock)
-
-
 
 
 async def update_token_consumed_paid(user_id: str,
@@ -86,10 +62,10 @@ async def update_token_consumed_free(user_id: str,
                 f"token_increase:{token_consumed_increase}")
             raise Exception("Token consumption exceeded")
         if user.token_consumed + token_consumed_increase < 0:
-           db.User.update(token_consumed=FREE_TOKEN).where(
+            db.User.update(token_consumed=FREE_TOKEN).where(
                 db.User.user_id == user_id).execute()
         else:
-           db.User.update(token_consumed=db.User.token_consumed + token_consumed_increase).where(
+            db.User.update(token_consumed=db.User.token_consumed + token_consumed_increase).where(
                 db.User.user_id == user_id).execute()
         logger.info(f"user_id:{user_id}, take free {token_consumed_increase} tokens")
     finally:

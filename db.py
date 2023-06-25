@@ -63,7 +63,7 @@ class Users(BaseModelNew):
     email_verified = DateTimeField()
     image = CharField()
     password = CharField()
-    credit = FloatField()
+    credits = FloatField()
     class Meta:
         table_name = 'users'
 
@@ -72,7 +72,7 @@ class CreditHistories(BaseModelNew):
     user_id = CharField()
     amount = FloatField()
     type = CharField(choices=('SIGN', 'PURCHASE', 'TASK'))
-    happendAt = DateTimeField(default=datetime.datetime.now)
+    happenedAt = DateTimeField(default=datetime.datetime.now)
     class Meta:
         table_name = 'credit_histories'
 
@@ -87,7 +87,7 @@ class UserToken(BaseModel):
         table_name = 'user_tokens'
 
 
-class ApiKey(BaseModel):
+class ApiKey(BaseModelNew):
     id = AutoField()
     key = CharField(unique=True)
     alive = BooleanField()
@@ -149,7 +149,7 @@ class PaperInfo(BaseModelNew):
         table_name = 'paper_info'
 
 class UserTasks(BaseModelNew):
-    id = AutoField(primary_key=True)
+    id = CharField(primary_key=True)
     user_id = CharField()
     pdf_hash = CharField()
     language = CharField()
