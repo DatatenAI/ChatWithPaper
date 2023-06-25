@@ -4,6 +4,8 @@ from typing import List
 
 from dotenv import load_dotenv
 
+from modules.util import gen_uuid
+
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
@@ -58,6 +60,7 @@ class MilvusPaperDocManager:
         self.field_name = field_name
         self.index_param = index_param
         self.output_field = output_field
+        self.nprobe = nprobe
 
         self.collection = self._get_collection()
         # self.collection.release()
@@ -103,7 +106,9 @@ class MilvusPaperDocManager:
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
-
+            "metric_type": "IP",
+            "offset": 1,
+            "params": {"nprobe": self.nprobe}
         }
         search_future = self.collection.search(data=[query_vector],
                                                anns_field=self.field_name,
@@ -114,7 +119,7 @@ class MilvusPaperDocManager:
                                                _async=True)
         results = search_future.result()
         if len(results[0]) > 0:
-            logger.info(f"Vectors searched, result: {[res.id for res in results[0]]}")
+            logger.info(f"Vectors searched, result: {[res.id for res in results[0]]}, distance:{12}")
         return results
 
     def update_vectors(self, vectors: List[List[float]], ids: List[int]):
@@ -148,6 +153,7 @@ class MilvusSinglePaperManager:
         self.field_name = field_name
         self.index_param = index_param
         self.output_field = output_field
+        self.nprobe = nprobe
 
         self.collection = self._get_collection()
         # self.collection.release()
@@ -186,14 +192,32 @@ class MilvusSinglePaperManager:
             logger.error(f"{e}")
         return False
 
-    def insert_vectors(self, vectors, ids):
-        collection = Collection(self.collection_name)
-        collection.insert([self.field_name], vectors, ids)
-        print("Vectors inserted successfully.")
+    def gen_uuids(self, num: int):
+        """
+        产生多个uuid
+        """
+        ids = []
+        for i in range(num):
+            ids.append(gen_uuid())
+        return ids
+    def insert_data(self,vecs:List[List[float]], pdf_hash:str, chunk_ids:List[int],pages:List[int]):
+        try:
+            num_vec = len(chunk_ids)
+            data = [self.gen_uuids(num_vec), vecs, [pdf_hash]*num_vec, chunk_ids, pages]
+            res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
+            self.collection.flush()
+        except Exception as e:
+            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
+            raise e
+
+    def insert_json_data(self,json_path):
+        pass
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
-
+            "metric_type": "IP",
+            "offset": 1,
+            "params": {"nprobe": self.nprobe}
         }
         search_future = self.collection.search(data=[query_vector],
                                                anns_field=self.field_name,
@@ -205,32 +229,43 @@ class MilvusSinglePaperManager:
         results = search_future.result()
         if len(results[0]) > 0:
             logger.info(f"Vectors searched, result: {[res.id for res in results[0]]}")
-        return results
+        return results[0]
+
+    def search_vectors_pdf(self,pdf_hash:str,query_vector: List[float], top_k: int):
+        """
+        从指定PDF中搜索数据
+        """
+
+        pass
+
 
     def update_vectors(self, vectors: List[List[float]], ids: List[int]):
-        collection = Collection(self.collection_name)
-        collection.update(ids, vectors, [self.field_name])
-        print("Vectors updated successfully.")
+        """
+        先删除所有的pdf_hash的数据，然后再插入新的数据
+        """
+        pass
 
+async def test():
+    manager = MilvusSinglePaperManager(host=os.getenv("MILVUS_HOST"),
+                                       port=os.getenv("MILVUS_PORT"),
+                                       alias="default",
+                                       user=os.getenv("MILVUS_USER"),
+                                       password=os.getenv("MILVUS_PASSWORD"),
+                                       collection_name=Spc.collection_name,
+                                       partition_name=Spc.partition_name,
+                                       schema=Spc.schema,
+                                       field_name=Spc.field_name,
+                                       index_param=Spc.index_param,
+                                       nprobe=10)
+
+    # 搜索向量
+    query = "methods"
+    query_vector = await embed_text(query)
+    top_k = 10
+    res = manager.search_vectors(query_vector, top_k)
 
 if __name__ == "__main__":
     # 示例用法
-    manager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
-                                    port=os.getenv("MILVUS_PORT"),
-                                    alias="default",
-                                    user=os.getenv("MILVUS_USER"),
-                                    password=os.getenv("MILVUS_PASSWORD"),
-                                    collection_name=Pdc.collection_name,
-                                    partition_name=Pdc.partition_name,
-                                    schema=Pdc.schema,
-                                    field_name=Pdc.field_name,
-                                    index_param=Pdc.index_param,
-                                    nprobe=10)
 
-
-    # 搜索向量
-    query_vector = [1.0] * 1536
-    top_k = 5
-    res = manager.search_vectors(query_vector, top_k)
     print(res)
 
