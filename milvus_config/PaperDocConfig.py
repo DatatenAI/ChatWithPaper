@@ -6,8 +6,10 @@ mysql的表名和collection_name一致
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 
-collection_name = "PaperDocVector"
-partition_name = "ArxivPapers"
+collection_name = "PaperSummaryDocVector"
+partition_name = "Papers"
+field_name = "summary_vector"
+output_field = ["doc_id", "pdf_hash"]
 
 paper_id = FieldSchema(
     name="doc_id",
@@ -33,7 +35,6 @@ schema = CollectionSchema(
     description="Paper Vector Database"
 )
 
-field_name = "summary_vector"
 
 index_param = {
     "metric_type": "IP",
@@ -43,4 +44,6 @@ index_param = {
 
 if __name__ == "__main__":
 
+
     print(schema)
+

@@ -3,19 +3,23 @@ import json
 import threading
 from loguru import logger
 from pydantic import BaseModel, Field, validator
+from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+load_dotenv()
+
+import db
+
+from chat_with_paper import handler
 
 current_script_directory = os.path.dirname(os.path.abspath(__file__))
 logger.info(f"work path:{current_script_directory}")
 
-from dotenv import load_dotenv
-load_dotenv()
-import db
 
+print(os.getenv('FILE_PATH'))
 
-from fastapi import FastAPI, Request
 
 import redis_manager
-from summary import handler
+
 
 app = FastAPI()
 

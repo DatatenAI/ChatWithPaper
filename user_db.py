@@ -1,3 +1,5 @@
+import peewee
+
 import redis_manager
 from constants import FREE_TOKEN
 import db
@@ -5,10 +7,42 @@ from loguru import logger
 
 
 
-async def update_points_consumed(user_id: str,
-                                 points_consumed: float):
+async def update_points_add(user_id: str,
+                                 points_consumed: float,
+                                 consumed_type: str):
+    """
+    消耗点数，消耗时候 points_consumed 是负，返回时候是正
+    """
+    lock_name = "consumed_points:" + user_id
+    lock = await redis_manager.acquire_lock(lock_name)
+    if not lock:
+        raise Exception("Too many requests")
 
-    pass
+    try:
+        # 增加credit值
+        user = db.Users.get(db.Users.id == user_id)
+        if not user:
+            logger.error(f"User: {user_id}, not found")
+            raise Exception("User not found")
+        if points_consumed > user.credit:
+            logger.error(f"point paid consumption exceeded, user_id:{user_id}"
+                         f"points_consumed:{points_consumed},"
+                         f"user credits:{user.credit}")
+        user.credit += points_consumed
+        user.save()
+        logger.info(f"user:{user_id} consumed points {points_consumed}")
+        # 增加历史记录
+        db.CreditHistories.create(user_id=user_id,
+                                  amount=points_consumed,
+                                  type=consumed_type)
+        logger.info(f"add user:{user_id} credit history, type:{consumed_type},points:{points_consumed}")
+    except Exception as e:
+        logger.error(f"update points ")
+        raise Exception(e)
+    finally:
+        await redis_manager.release_lock(lock_name, lock)
+
+
 
 
 async def update_token_consumed_paid(user_id: str,

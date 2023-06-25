@@ -16,7 +16,7 @@ from modules.chatmodel.openai_chat import chat_paper_api
 from modules.fileactioins.filesplit import find_next_section, split_text
 
 
-from modules.util import split_list, save_to_file, load_from_file, print_token, save_data_to_json, load_data_from_json
+from modules.util import split_list, print_token, save_data_to_json, load_data_from_json
 from modules.util import gen_uuid, retry
 
 if os.getenv('ENV') == 'DEV':

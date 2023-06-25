@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from loguru import logger
+
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 

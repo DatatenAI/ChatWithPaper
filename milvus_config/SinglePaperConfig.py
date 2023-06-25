@@ -3,18 +3,17 @@ Paper筛选总结后的向量建表Field
 mysql的表名和collection_name一致
 """
 
-
 from pymilvus import CollectionSchema, FieldSchema, DataType
-
-
 
 collection_name = "SinglePaperDocVector"
 partition_name = "SinglePapers"
 field_name = "chunk_vector"
+output_field = ["paper_id", "pdf_hash", "chunk_id", "page"]
 
 paper_id = FieldSchema(
     name="paper_id",
-    dtype=DataType.INT64,
+    dtype=DataType.VARCHAR,
+    max_length=40,
     is_primary=True,
 )
 
@@ -49,26 +48,43 @@ schema = CollectionSchema(
     description="Paper Vector Database"
 )
 
-
 index_param = {
     "metric_type": "IP",
     "index_type": "IVF_FLAT",
     "params": {"nlist": 1024}
 }
 
-async def test_insert_data():
+
+async def test_insert_data(coll):
     from modules.util import load_data_from_json
     import os
     from dotenv import load_dotenv
+    from loguru import logger
     load_dotenv()
+    from modules.util import gen_uuid
 
     pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
     structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
+    logger.info("begin load json")
     flat_results_json = await load_data_from_json(structure_path)
+    logger.info(f"load success")
     print(flat_results_json[0])
-    # for res in flat_results_json:
+    ids = []
+    vecs = []
+    hashs = []
+    chunk_ids = []
+    pages = []
+    for res in flat_results_json:
+        ids.append(gen_uuid())
+        vecs.append(res['vectors'])
+        chunk_ids.append(res['id'])
+        hashs.append(pdf_hash)
+        pages.append(res['page'])
+    insert_data = [ids, vecs, chunk_ids, hashs, pages]
+    res = coll.insert(data=insert_data, partition_name=partition_name, _async=True)
+    coll.flush()
+    print(res)
 
-    pass
 
 if __name__ == "__main__":
     from pymilvus import connections
@@ -102,9 +118,7 @@ if __name__ == "__main__":
 
     collection.create_index(field_name="chunk_vector", index_params=index_param)
     print(collection.index().params)
+    collection.load()
 
-    asyncio.run(test_insert_data())
+    asyncio.run(test_insert_data(collection))
     # test insert data
-
-
-

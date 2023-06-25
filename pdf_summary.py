@@ -147,7 +147,7 @@ async def get_title_brief_info(first_page: str, final_res: str, language: str = 
             raise Exception("No summary found")
 
     async def process_basic():
-        res_basic = await process_text(From_FirstPage_Extract_BasicInfo, first_page, "中文")
+        res_basic = await process_text(From_FirstPage_Extract_BasicInfo, first_page, language)
         basic_info = res_basic[0]
         token_cost = res_basic[1]
         return basic_info, token_cost

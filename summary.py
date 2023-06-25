@@ -8,6 +8,7 @@ from typing import Union, Tuple
 from dotenv import load_dotenv
 from loguru import logger
 
+import user_db
 from modules.vectors.get_embeddings import get_embeddings_from_pdf, embed_text
 
 if os.getenv('ENV') == 'DEV':
@@ -139,8 +140,15 @@ async def process_summary(task_data):
         summary_temp=task_data['summary_temp']
     )
     pdf_path = os.path.join(PDF_SAVE_DIR, f'{pdf_hash}.pdf')
+    # TODO 检查是否处理过
+    is_process = db.Summaries.get_or_none(
+        pdf_hash=task_data['pdf_hash'],
+        language=task_data['language'],
+    )
+    if is_process:
+        logger.info(f"user:{user_id}, pdf hash: {pdf_hash},lang:{task_data['language']} finished")
+        return None
     try:
-
         vec_split_task = get_embeddings_from_pdf(pdf_path, max_token=512)
         summary_task = summary(summary_data=summary_data)
         vec_split_data, res_data = await asyncio.gather(vec_split_task, summary_task)
@@ -174,19 +182,13 @@ async def process_summary(task_data):
                 db.UserTasks.type == task_data['task_type'],
             ).execute()
             logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
-            # TODO 还钱
-            # 从tasks得到user_id查 accounts表的
-            credit_history_info = {
-
-            }
-
-            user_info = {
-
-            }
-
-
-            logger.info(f"give back user {user_id}, points {pages}")
-
+            # 还钱
+            try:
+                await user_db.update_points_add(user_id, pages, 'TASK')
+                logger.info(f"give back user {user_id}, points {pages} success")
+            except Exception as e:
+                logger.error(f"give back user {user_id}, points {pages} fail")
+                raise Exception(e)
         raise e
 
     title, title_zh, basic_info, brief_intro, firstpage_conclusion, summary_res, pdf_vec, token_cost_all = res_data
@@ -224,17 +226,14 @@ async def process_summary(task_data):
                 logger.info(f"add summaries id={obj}, pdf_hash={pdf_hash}, language={task_data['language']}")
             else:
                 logger.info(f"update summaries id={obj}, pdf_hash={pdf_hash}")
+            # TODO 添加进向量数据库中
 
-            # 添加进向量数据库中
 
         except Exception as e:
             logger.error(f"{e}")
 
     elif user_type == 'user':
-        # TODO 将数据写入到任务表中和summaries表中
-        points = task_data['pages']
-        # if util.is_cost_purchased(user, estimate_token):
-        #     await user_db.update_token_consumed_paid(user_id, points)
+        # 将数据写入到任务表中和summaries表中
 
         try:
             task_obj = db.UserTasks.update(
@@ -261,23 +260,15 @@ async def process_summary(task_data):
                 content=summary_res,
             )
             logger.info(f"add user {task_data['user_id']}, summaries id={summary_obg}, pdf_hash={pdf_hash}")
+            # TODO 添加进向量数据库中
+
         except Exception as e:
             logger.error(f"{e}")
 
     return None
 
 
-def handler(event_str):
-    try:
-        event = os.getenv("FC_CUSTOM_CONTAINER_EVENT")
-        logger.info(f"receive env: {event}")
-        if event is None:
-            event = event_str
-        logger.info(f"receive event: {event}")
-        task_data = json.loads(event)
-        asyncio.run(process_summary(task_data))
-    except Exception as e:
-        logger.error(f"handler error: {e}")
+
 
 
 async def testUserTask():
