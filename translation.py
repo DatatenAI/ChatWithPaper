@@ -129,10 +129,11 @@ async def process_translate(task_data):
             except Exception as e:
                 logger.error(f"give back user {user_id}, points {pages} fail {e}")
                 raise Exception(e)
+        logger.error(f"{e}")
         raise e
 
 
-        logger.error(f"{e}")
+
 
 async def test_process_translate():
     user_type = 'spider'
