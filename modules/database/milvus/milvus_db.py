@@ -276,14 +276,14 @@ class MilvusSinglePaperManager:
             ids.append(gen_uuid())
         return ids
 
-    async def insert_data(self, vecs: List[List[float]], pdf_hash: str, chunk_ids: List[int], pages: List[int]):
+    async def insert_data(self, vecs: List[List[float]], pdf_hash: str, chunk_ids: List[int], pages: List[int], sql_ids: List[int]):
         """
         插入向量 ,分段 和pages id
         """
         try:
             logger.info(f"begin insert vec")
             num_vec = len(chunk_ids)
-            data = [self.gen_uuids(num_vec), vecs, [pdf_hash] * num_vec, chunk_ids, pages]
+            data = [self.gen_uuids(num_vec), vecs, [pdf_hash] * num_vec, chunk_ids, pages, sql_ids]
             res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
             self.collection.flush()
             logger.info(f"end insert {self.collection_name}, pdf_hash: {pdf_hash}, {num_vec} vector data")
@@ -299,11 +299,13 @@ class MilvusSinglePaperManager:
         vecs = []
         chunk_ids = []
         pages = []
+        sql_ids = []
         for res in flat_results_json:
             vecs.append(res['vectors'])
             chunk_ids.append(res['id'])
             pages.append(res['page'])
-        res = await self.insert_data(vecs, pdf_hash, chunk_ids, pages)
+            sql_ids.append(res['sql_id'])
+        res = await self.insert_data(vecs, pdf_hash, chunk_ids, pages,sql_ids)
         return res
 
     def search_vectors(self, query_vector: List[float], top_k: int):
