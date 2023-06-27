@@ -1,8 +1,6 @@
-import peewee
-
 import redis_manager
 from constants import FREE_TOKEN
-import db
+from modules.database.mysql import db
 from loguru import logger
 
 

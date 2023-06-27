@@ -1,9 +1,6 @@
 import asyncio
-import datetime
 import json
 import os
-from pathlib import Path
-from typing import Union, Tuple
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -11,7 +8,7 @@ from loguru import logger
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
-import db
+from modules.database.mysql import db
 import pdf_summary
 
 logger.opt(exception=True)

@@ -3,14 +3,12 @@ from loguru import logger
 import json
 import asyncio
 
-import db
+from modules.database.mysql import db
 from summary import process_summary
 from translation import process_translate
 
 
 def handler(event_str):
-
-
 
     try:
         event = os.getenv("FC_CUSTOM_CONTAINER_EVENT")

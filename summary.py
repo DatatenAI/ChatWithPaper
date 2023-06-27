@@ -9,12 +9,12 @@ from dotenv import load_dotenv
 from loguru import logger
 
 import user_db
-from modules.vectors.get_embeddings import get_embeddings_from_pdf, embed_text
+from modules.vectors.get_embeddings import get_embeddings_from_pdf
 
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
-import db
+from modules.database.mysql import db
 import pdf_summary
 
 logger.opt(exception=True)

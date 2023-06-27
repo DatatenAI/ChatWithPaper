@@ -7,7 +7,7 @@ from loguru import logger
 import fitz
 import tiktoken
 
-import db
+from modules.database.mysql import db
 from constants import FREE_TOKEN
 
 

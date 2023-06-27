@@ -7,8 +7,6 @@ from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 load_dotenv()
 
-import db
-
 from chat_with_paper import handler
 
 current_script_directory = os.path.dirname(os.path.abspath(__file__))
@@ -16,10 +14,6 @@ logger.info(f"work path:{current_script_directory}")
 
 
 print(os.getenv('FILE_PATH'))
-
-
-import redis_manager
-
 
 app = FastAPI()
 

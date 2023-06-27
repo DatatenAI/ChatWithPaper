@@ -112,13 +112,13 @@ class MilvusPaperDocManager:
             ids.append(gen_uuid())
         return ids
 
-    async def insert_data(self, vecs: List[float], pdf_hash: str):
+    async def insert_data(self, vecs: List[float], pdf_hash: str, sql_id: str):
         """
         插入向量 ,分段 和pages id
         """
         try:
             logger.info(f"begin insert vec")
-            data = [self.gen_uuids(1), [vecs], [pdf_hash]]
+            data = [self.gen_uuids(1), [vecs], [pdf_hash], [sql_id]]
             res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
             self.collection.flush()
             logger.info(f"end insert {self.collection_name},pdf_hash: {pdf_hash} vector data")
@@ -127,14 +127,16 @@ class MilvusPaperDocManager:
             raise e
         return res.result()
 
-    async def insert_json_data(self, structure_path: str, pdf_hash: str):
+    async def insert_json_data(self, structure_path: str):
         # TODO
         """
         直接把structure.json文件进行加载后上传
         """
         flat_results_json = await load_data_from_json(structure_path)
         vec = flat_results_json['vectors']
-        res = await self.insert_data(vec, pdf_hash)
+        pdf_hash = flat_results_json['sql_id']
+        sql_id = flat_results_json['sql_id']
+        res = await self.insert_data(vec, pdf_hash, sql_id)
         return res
 
     def search_vectors(self, query_vector: List[float], top_k: int):

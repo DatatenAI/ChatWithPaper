@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
 
-import db
+from modules.database.mysql import db
 import numpy as np
 
 

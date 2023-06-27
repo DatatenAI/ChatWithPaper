@@ -1,7 +1,7 @@
 import json
 from typing import List, Any
 
-import db
+from modules.database.mysql import db
 
 
 def get_history(pdf_hash: str, user_id: str) -> List[Any]:

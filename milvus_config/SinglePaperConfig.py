@@ -43,8 +43,14 @@ page = FieldSchema(
     description="page number in the files"
 )
 
+sql_id = FieldSchema(
+    name="sql_id",
+    dtype=DataType.INT64,
+    description='sql id for paper_chunks'
+)
+
 schema = CollectionSchema(
-    fields=[paper_id, chunk_vector, paper_hash, chunk_id, page],
+    fields=[paper_id, chunk_vector, paper_hash, chunk_id, page, sql_id],
     description="Paper Vector Database"
 )
 
@@ -52,10 +58,6 @@ index_param = {
     "metric_type": "IP",
     "index_type": "IVF_FLAT",
     "params": {"nlist": 1024}
-}
-
-pdf_hash_index = {
-
 }
 
 

@@ -119,6 +119,10 @@ class PaperDocVector(BaseModel):
     vector_id = IntegerField()
 
 
+class PaperQuestions(BaseModelNew):
+    id = AutoField()
+
+
 
 class PaperInfo(BaseModelNew):
     id = AutoField(primary_key=True)
