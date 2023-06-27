@@ -13,7 +13,7 @@ output_field = ["paper_id", "pdf_hash", "chunk_id", "page"]
 paper_id = FieldSchema(
     name="paper_id",
     dtype=DataType.VARCHAR,
-    max_length=40,
+    max_length=64,
     is_primary=True,
 )
 
@@ -80,13 +80,17 @@ async def test_insert_data(coll):
     hashs = []
     chunk_ids = []
     pages = []
+    sql_id = []
+    flag = 0
     for res in flat_results_json:
         ids.append(gen_uuid())
         vecs.append(res['vectors'])
         chunk_ids.append(res['id'])
         hashs.append(pdf_hash)
         pages.append(res['page'])
-    insert_data = [ids, vecs, hashs, chunk_ids, pages]
+        sql_id.append(flag)
+        flag += 1
+    insert_data = [ids, vecs, hashs, chunk_ids, pages, sql_id]
     res = coll.insert(data=insert_data, partition_name=partition_name, _async=True)
     coll.flush()
     print(res)
@@ -118,13 +122,13 @@ if __name__ == "__main__":
         using='default',
         shards_num=2  # 集合中分片数量
     )
-    # partition = collection.create_partition(partition_name=partition_name)
+    partition = collection.create_partition(partition_name=partition_name)
     #
     # print(collection.partitions)
     #
-    # collection.create_index(field_name=field_name, index_params=index_param)
+    collection.create_index(field_name=field_name, index_params=index_param)
     # print(collection.index().params)
-    # collection.load()
+    collection.load()
 
     asyncio.run(test_insert_data(collection))
     # test insert data

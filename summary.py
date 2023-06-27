@@ -151,9 +151,8 @@ async def process_summary(task_data):
         vec_split_task = get_embeddings_from_pdf(pdf_path, max_token=512)
         summary_task = summary(summary_data=summary_data)
         vec_split_data, res_data = await asyncio.gather(vec_split_task, summary_task)
-        # TODO 添加进向量数据库中
 
-
+        # 只需要token就够了
 
 
     except Exception as e:

@@ -119,8 +119,33 @@ class PaperDocVector(BaseModel):
     vector_id = IntegerField()
 
 
+
+
 class PaperQuestions(BaseModelNew):
     id = AutoField()
+    pdf_hash = CharField()
+    language = CharField()  # 语言
+    question = TextField()  # 可能问的问题
+    page = IntegerField()   # 页码，如果是0，代表是对这篇文章summary可能问的问题，页码是其他代表对其他页可能问的问题
+    cost_tokens = FloatField()  # 消耗的tokens
+    createdAt = DateTimeField(default=datetime.datetime.now)    # 创建时间
+    updatedAt = DateTimeField(default=datetime.datetime.now)  # 更新时间
+
+    class Meta:
+        table_name = 'paper_questions'
+
+
+class PaperChunks(BaseModelNew):
+    id = AutoField()
+    pdf_hash = CharField()
+    page = IntegerField()   # 页码，chunk出来的页码
+    text = TextField()      # 拆分出来的
+    cost_tokens = FloatField()  # 消耗的tokens
+    createdAt = DateTimeField(default=datetime.datetime.now)
+    updatedAt = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = 'paper_chunks'
 
 
 

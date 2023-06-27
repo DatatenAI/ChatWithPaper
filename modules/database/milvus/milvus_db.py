@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from pymilvus import connections, Collection, utility
 from loguru import logger
 
-from modules.vectors.get_embeddings import embed_text
 import milvus_config.PaperDocConfig as Pdc
 import milvus_config.SinglePaperConfig as Spc
 
@@ -103,7 +102,7 @@ class MilvusPaperDocManager:
             logger.error(f"{e}")
         return False
 
-    def gen_uuids(self, num: int):
+    def gen_uuids(self, num: int)->List[str]:
         """
         产生多个uuid
         """
@@ -112,13 +111,16 @@ class MilvusPaperDocManager:
             ids.append(gen_uuid())
         return ids
 
-    async def insert_data(self, vecs: List[float], pdf_hash: str, sql_id: str):
+
+
+    async def insert_data(self, ids: str, vecs: List[float],
+                          pdf_hash: str, sql_id: int):
         """
-        插入向量 ,分段 和pages id
+        插入一条向量 ,分段 和pages id
         """
         try:
             logger.info(f"begin insert vec")
-            data = [self.gen_uuids(1), [vecs], [pdf_hash], [sql_id]]
+            data = [[ids], [vecs], [pdf_hash], [sql_id]]
             res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
             self.collection.flush()
             logger.info(f"end insert {self.collection_name},pdf_hash: {pdf_hash} vector data")
@@ -127,17 +129,36 @@ class MilvusPaperDocManager:
             raise e
         return res.result()
 
-    async def insert_json_data(self, structure_path: str):
-        # TODO
+    # async def insert_json_data(self, structure_path: str):
+    #     """
+    #     直接把structure.json文件进行加载后上传
+    #     """
+    #     flat_results_json = await load_data_from_json(structure_path)
+    #     vec_id = flat_results_json['vec_id']
+    #     vec = flat_results_json['vectors']
+    #     pdf_hash = flat_results_json['pdf_hash']
+    #     sql_id = flat_results_json['sql_id']
+    #     res = await self.insert_data(vec_id, vec, pdf_hash, sql_id)
+    #     return res
+
+    # ok
+    def get_entity_by_sql_id(self, ids: List[int]) -> list[dict]:
         """
-        直接把structure.json文件进行加载后上传
+        输入ids然后获取对应的vectors
         """
-        flat_results_json = await load_data_from_json(structure_path)
-        vec = flat_results_json['vectors']
-        pdf_hash = flat_results_json['sql_id']
-        sql_id = flat_results_json['sql_id']
-        res = await self.insert_data(vec, pdf_hash, sql_id)
-        return res
+        expr = f"sql_id in {ids}"
+        logger.info(f"expr = {expr}")
+        search_future = self.collection.query(
+            expr=expr,
+            offset=0,
+            limit=10,
+            output_fields=self.output_field,
+            consistency_level="Strong",
+            partition_names=[self.partition_name] if self.partition_name else None,
+            _async=True
+        )
+        logger.info(f"search vec, get {len(search_future)} num data, result ids {ids}")
+        return search_future
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
@@ -276,14 +297,20 @@ class MilvusSinglePaperManager:
             ids.append(gen_uuid())
         return ids
 
-    async def insert_data(self, vecs: List[List[float]], pdf_hash: str, chunk_ids: List[int], pages: List[int], sql_ids: List[int]):
+    async def insert_data(self,
+                          ids: List[str],
+                          vecs: List[List[float]],
+                          pdf_hash: str,
+                          chunk_ids: List[int],
+                          pages: List[int],
+                          sql_ids: List[int]):
         """
         插入向量 ,分段 和pages id
         """
         try:
             logger.info(f"begin insert vec")
             num_vec = len(chunk_ids)
-            data = [self.gen_uuids(num_vec), vecs, [pdf_hash] * num_vec, chunk_ids, pages, sql_ids]
+            data = [ids, vecs, [pdf_hash] * num_vec, chunk_ids, pages, sql_ids]
             res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
             self.collection.flush()
             logger.info(f"end insert {self.collection_name}, pdf_hash: {pdf_hash}, {num_vec} vector data")
@@ -291,6 +318,7 @@ class MilvusSinglePaperManager:
             logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
             raise e
         return res.result()
+
     async def insert_json_data(self, structure_path: str, pdf_hash: str):
         """
         直接把structure.json文件进行加载后上传
@@ -300,13 +328,33 @@ class MilvusSinglePaperManager:
         chunk_ids = []
         pages = []
         sql_ids = []
+        ids = []
         for res in flat_results_json:
+            ids.append(gen_uuid())
             vecs.append(res['vectors'])
             chunk_ids.append(res['id'])
             pages.append(res['page'])
             sql_ids.append(res['sql_id'])
-        res = await self.insert_data(vecs, pdf_hash, chunk_ids, pages,sql_ids)
+        res = await self.insert_data(ids, vecs, pdf_hash, chunk_ids, pages, sql_ids)
         return res
+
+    def get_entity_by_sql_id(self, ids: List[int]) -> list[dict]:
+        """
+        输入ids然后获取对应的vectors
+        """
+        expr = f"sql_id in {ids}"
+        logger.info(f"expr = {expr}")
+        search_future = self.collection.query(
+            expr=expr,
+            offset=0,
+            limit=100,
+            output_fields=self.output_field,
+            consistency_level="Strong",
+            partition_names=[self.partition_name] if self.partition_name else None,
+            _async=True
+        )
+        logger.info(f"search vec, get {len(search_future)} num data, result ids {ids}")
+        return search_future
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
@@ -386,6 +434,10 @@ async def test_paper():
                                        field_name=Pdc.field_name,
                                        index_param=Pdc.index_param,
                                        nprobe=10)
+
+    ids = [123]
+    res =manager.get_entity_by_sql_id(ids)
+
     # 搜索向量
     pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
 

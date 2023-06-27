@@ -14,6 +14,10 @@ from loguru import logger
 from dotenv import load_dotenv
 
 from modules.chatmodel.openai_chat import chat_paper_api
+from modules.database.milvus.milvus_db import MilvusPaperDocManager
+from modules.database.mysql import db
+import milvus_config.PaperDocConfig as Pdc
+import milvus_config.SinglePaperConfig as Spc
 
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
@@ -23,6 +27,17 @@ from modules.fileactioins.filesplit import get_paper_split_res
 from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token, save_data_to_json, \
     load_data_from_json
 
+milvus_PaperDocManager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
+                                       port=os.getenv("MILVUS_PORT"),
+                                       alias="default",
+                                       user=os.getenv("MILVUS_USER"),
+                                       password=os.getenv("MILVUS_PASSWORD"),
+                                       collection_name=Pdc.collection_name,
+                                       partition_name=Pdc.partition_name,
+                                       schema=Pdc.schema,
+                                       field_name=Pdc.field_name,
+                                       index_param=Pdc.index_param,
+                                       nprobe=10)
 
 async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
     """
@@ -221,17 +236,20 @@ async def save_str_files(file_data: str, file_path: str):
         await f.write(file_data)
 
 
-
 async def get_the_formatted_summary_from_pdf(
         pdf_file_path: str,
         language: str = "Chinese",
         summary_temp: str = 'default',
-) -> tuple:
+):
+    """
+    传入pdf的路径，语言，总结的模板
+    返回
+    """
     logger.info(f"start summary pdf,path:{pdf_file_path},language:{language}")
     base_path, ext = os.path.splitext(pdf_file_path)
     pdf_hash = base_path.replace('\\', '/').split('/')[-1]
 
-    first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
+    first_page_path = f"{base_path}.firs_tpage_conclusion.{language}.{summary_temp}.txt"
     format_path = f"{base_path}.formatted.{language}.{summary_temp}.txt"
     title_path = f"{base_path}.title.{language}.{summary_temp}.txt"
     title_zh_path = f"{base_path}.title_zh.{language}.{summary_temp}.txt"
@@ -241,139 +259,196 @@ async def get_the_formatted_summary_from_pdf(
     pdf_vec_path = f"{os.getenv('FILE_PATH')}/out/{pdf_hash}.json"
 
     token_cost_all = 0
-    if not os.path.isfile(format_path):  # 如果不存在
-        logger.info(f"{format_path} formatted txt not exists")
-        try:
-            complete_sum_res, firstpage_conclusion, token_cost = await get_the_complete_summary(
-                pdf_file_path, language=language, summary_temp=summary_temp)  # 信息压缩
-        except Exception as e:
-            logger.error(f"get the complete summary error: {e}")
-            raise Exception(str(e))
-        token_cost_all += token_cost
-        if complete_sum_res is None:
-            logger.error(f"complete summary is None")
-            raise Exception("summary is None")
-        complete_sum_res = str(complete_sum_res)
-        if len(str(complete_sum_res)) < 200:
-            raise Exception("summary is None")
-        summary_res, token_cost = await get_paper_final_summary(
-            text=complete_sum_res,
-            language=language)
-        # 将格式重新处理
 
-        token_cost_all += token_cost
-        if not isinstance(summary_res, str):
-            raise Exception("No summary found")
+    # 先检查数据库中是否存在,然后再
+    question_data = db.PaperQuestions.get_or_none(db.PaperQuestions.pdf_hash == pdf_hash,
+                                                  db.PaperQuestions.language == language,
+                                                  db.PaperQuestions.page == 0)
+    # 如果存在总结的summaries
+    if question_data:
 
-        if not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 50:
-            raise Exception("No conclusion found")
+        info_data = db.PaperInfo.get_or_none(db.PaperInfo.pdf_hash == pdf_hash)
 
-        # 如果不够稳定的话，可以用chat做完整的替代，这个成本应该不高，但是应该比较慢
-        # 在这里将基本信息和总结信息拼接起来：      
-        # 我们需要先将基本信息的标题单独提取出来；
-        # 从basic_info 中提取中文title, brief intro
-        summary_res = re.sub(r'\\+n', '\n', summary_res)
-        # TODO 报错处理
-        title, title_zh, basic_info, brief_intro, token_cost = await get_title_brief_info(
-            first_page=firstpage_conclusion,
-            final_res=summary_res, language="中文")
-        token_cost_all += token_cost
+        # 读取 summaries的信息
+        summary_data = db.Summaries.get_or_none(db.Summaries.pdf_hash == pdf_hash,
+                                                db.Summaries.language == language,
+                                                )
+        title = summary_data.title
+        title_zh = summary_data.title_zh
+        basic_info = summary_data.basic_info
+        brief_introduction = summary_data.brief_introduction
+        first_page_conclusion = summary_data.first_page_conclusion
+        final_res = summary_data.content
+        medium_content = summary_data.medium_content
+        short_content = summary_data.short_content
 
-        basic_info = re.sub(r'\\+n', '\n', basic_info)
-        brief_intro = re.sub(r'\\+n', '\n', brief_intro)
-        final_res = re.sub(r'\\+n', '\n', summary_res)
-        title_zh = re.sub(r'\\+n', '\n', title_zh)
+        # question
 
+        problem_to_ask = question_data.question
+        token_cost_all += question_data.cost_tokens
+        # 向量数据库的信息
+        sql_id = int(question_data.id)
+        pdf_vec = milvus_PaperDocManager.get_entity_by_sql_id([sql_id])[0]['summary_vector']
+        return token_cost_all
 
-        if Path(pdf_vec_path).is_file():
-            pdf_vec_data = await load_data_from_json(pdf_vec_path)
-            pdf_vec = pdf_vec_data['vectors']
-            vec_tokens = pdf_vec_data['tokens']
-            token_cost_all += vec_tokens
-            logger.info(f"load pdf vec:{pdf_vec_path}")
+    else:
+        # 判断 是否存在
+        # 读取 summaries的信息
+        summary_data = db.Summaries.get_or_none(db.Summaries.pdf_hash == pdf_hash,
+                                                db.Summaries.language == language,
+                                                )
+        if summary_data:
+            title = summary_data.title
+            title_zh = summary_data.title_zh
+            basic_info = summary_data.basic_info
+            brief_introduction = summary_data.brief_introduction
+            first_page_conclusion = summary_data.first_page_conclusion
+            final_res = summary_data.content
+            medium_content = summary_data.medium_content
+            short_content = summary_data.short_content
         else:
-            # 向量化
-            # 对这篇文章可能问的问题
-            problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
-            token_cost_all += problem_tokens
-            meta_data = json.dumps({
-                "title": title,
-                "title_zh": title_zh,
-                "basic_info": basic_info,
-                "brief_intro": brief_intro,
-                "summary": final_res,
-                "problem_to_ask": problem_to_ask
-            }, ensure_ascii=False, indent=4)
-            pdf_vec, vec_tokens = await embed_text(meta_data)
-            token_cost_all += vec_tokens
+            try:
+                complete_sum_res, first_page_conclusion, token_cost = await get_the_complete_summary(
+                    pdf_file_path, language=language, summary_temp=summary_temp)  # 信息压缩
+            except Exception as e:
+                logger.error(f"get the complete summary error: {e}")
+                raise Exception(str(e))
+            token_cost_all += token_cost
+            if complete_sum_res is None:
+                logger.error(f"complete summary is None")
+                raise Exception("summary is None")
+            complete_sum_res = str(complete_sum_res)
+            if len(str(complete_sum_res)) < 200:
+                raise Exception("summary is None")
+            summary_res, token_cost = await get_paper_final_summary(
+                text=complete_sum_res,
+                language=language)
+            # 将格式重新处理
+            token_cost_all += token_cost
 
-            # 存入json文件中
-            pdf_vec_info = {
-                "pdf_hash": pdf_hash,
-                "vectors": pdf_vec,
-                "problem_to_ask": problem_to_ask,
-                "tokens": vec_tokens
-            }
-            await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
+            if not isinstance(summary_res, str):
+                raise Exception("No summary found")
+
+            # 如果不够稳定的话，可以用chat做完整的替代，这个成本应该不高，但是应该比较慢
+            # 在这里将基本信息和总结信息拼接起来：
+            # 我们需要先将基本信息的标题单独提取出来；
+            # 从basic_info 中提取中文title, brief intro
+            summary_res = re.sub(r'\\+n', '\n', summary_res)
+            # TODO 报错处理
+            title, title_zh, basic_info, brief_introduction, token_cost = await get_title_brief_info(
+                first_page=first_page_conclusion,
+                final_res=summary_res, language="中文")
+
+            token_cost_all += token_cost
+            basic_info = re.sub(r'\\+n', '\n', basic_info)
+            brief_introduction = re.sub(r'\\+n', '\n', brief_introduction)
+            final_res = re.sub(r'\\+n', '\n', summary_res)
+            title_zh = re.sub(r'\\+n', '\n', title_zh)
+
+            # 插入Summaries
+            summary_obg = db.Summaries.create(
+                pdf_hash=pdf_hash,
+                language=language,
+                title=title,
+                title_zh=title_zh,
+                basic_info=basic_info,
+                brief_introduction=brief_introduction,
+                first_page_conclusion=first_page_conclusion,
+                content=final_res
+            )
+
+
+        # 向量化
+        # 对这篇文章可能问的问题
+        problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
+        token_cost_all += problem_tokens
+        meta_data = json.dumps({
+            "title": title,
+            "title_zh": title_zh,
+            "basic_info": basic_info,
+            "brief_intro": brief_introduction,
+            "summary": final_res,
+            "problem_to_ask": problem_to_ask
+        }, ensure_ascii=False, indent=4)
+        pdf_vec, vec_tokens = await embed_text(meta_data)
+        token_cost_all += vec_tokens
+
+        # 存入 db 和 vec db
+        # TODO
+        question_obg = db.PaperQuestions.create(
+            pdf_hash=pdf_hash,
+            language=language,
+            question=problem_to_ask,
+            page=0,
+            cost_tokens=problem_tokens
+        )
+        token_cost_all += problem_tokens
+        logger.info(f"insert PaperQuestions, pdf_hash summary:{pdf_hash},cost_tokens={problem_tokens}")
+
+        await milvus_PaperDocManager.insert_data(ids=gen_uuid(),
+                                                 vecs=pdf_vec,
+                                                 pdf_hash=pdf_hash,
+                                                 sql_id=question_obg.id)
+
+        # await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
         # 在这儿存最终的总结文本信息：
-
         # save file title_path
         await save_str_files(title, title_path)
         await save_str_files(title_zh, title_zh_path)
         await save_str_files(basic_info, basic_info_path)
-        await save_str_files(brief_intro, brief_intro_path)
+        await save_str_files(brief_introduction, brief_intro_path)
         await save_str_files(final_res, format_path)
         await save_str_files(str(token_cost_all), token_path)
 
-        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
+        return token_cost_all
 
-    else:  # 如果format 文件存在
-        logger.info(f"{format_path} formatted txt exists")
-
-        if not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 50:
-            raise Exception("No conclusion found")
-
-        title = await read_str_files(title_path)
-        title_zh = await read_str_files(title_zh_path)
-        basic_info = await read_str_files(basic_info_path)
-        brief_intro = await read_str_files(brief_intro_path)
-        firstpage_conclusion = await read_str_files(first_page_path)
-        final_res = await read_str_files(format_path)
-        token_cost_all = await read_str_files(token_path)
-        token_cost_all = int(0 if token_cost_all == '' else int(token_cost_all))
-
-        if Path(pdf_vec_path).is_file():
-            pdf_vec_data = await load_data_from_json(pdf_vec_path)
-            pdf_vec = pdf_vec_data['vectors']
-            vec_tokens = pdf_vec_data['tokens']
-            token_cost_all += vec_tokens
-            logger.info(f"load pdf vec:{pdf_vec_path}")
-        else:
-            # 向量化
-            # 对这篇文章可能问的问题
-            problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
-            token_cost_all += problem_tokens
-            meta_data = json.dumps({
-                "title": title,
-                "title_zh": title_zh,
-                "basic_info": basic_info,
-                "brief_intro": brief_intro,
-                "summary": final_res,
-                "problem_to_ask": problem_to_ask
-            }, ensure_ascii=False, indent=4)
-            pdf_vec, vec_tokens = await embed_text(meta_data)
-            token_cost_all += vec_tokens
-            # 存入json文件中
-            pdf_vec_info = {
-                "pdf_hash": pdf_hash,
-                "vectors": pdf_vec,
-                "problem_to_ask": problem_to_ask,
-                "tokens": vec_tokens
-            }
-            await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
-
-
-        return title, title_zh, basic_info, brief_intro, firstpage_conclusion, final_res, pdf_vec, token_cost_all
+    # else:  # 如果format 文件存在
+    #     logger.info(f"{format_path} formatted txt exists")
+    #
+    #     if not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 50:
+    #         raise Exception("No conclusion found")
+    #
+    #     title = await read_str_files(title_path)
+    #     title_zh = await read_str_files(title_zh_path)
+    #     basic_info = await read_str_files(basic_info_path)
+    #     brief_intro = await read_str_files(brief_intro_path)
+    #     first_page_conclusion = await read_str_files(first_page_path)
+    #     final_res = await read_str_files(format_path)
+    #     token_cost_all = await read_str_files(token_path)
+    #     token_cost_all = int(0 if token_cost_all == '' else int(token_cost_all))
+    #
+    #     if Path(pdf_vec_path).is_file():
+    #         pdf_vec_data = await load_data_from_json(pdf_vec_path)
+    #         pdf_vec = pdf_vec_data['vectors']
+    #         vec_tokens = pdf_vec_data['tokens']
+    #         token_cost_all += vec_tokens
+    #         logger.info(f"load pdf vec:{pdf_vec_path}")
+    #     else:
+    #         # 向量化
+    #         # 对这篇文章可能问的问题
+    #         problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
+    #         token_cost_all += problem_tokens
+    #         meta_data = json.dumps({
+    #             "title": title,
+    #             "title_zh": title_zh,
+    #             "basic_info": basic_info,
+    #             "brief_intro": brief_intro,
+    #             "summary": final_res,
+    #             "problem_to_ask": problem_to_ask
+    #         }, ensure_ascii=False, indent=4)
+    #         pdf_vec, vec_tokens = await embed_text(meta_data)
+    #         token_cost_all += vec_tokens
+    #         # 存入json文件中
+    #         pdf_vec_info = {
+    #             "pdf_hash": pdf_hash,
+    #             "vectors": pdf_vec,
+    #             "problem_to_ask": problem_to_ask,
+    #             "tokens": vec_tokens
+    #         }
+    #         await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
+    #
+    #
+    #     return title, title_zh, basic_info, brief_intro, first_page_conclusion, final_res, pdf_vec, token_cost_all
 
 
 async def get_the_complete_summary(pdf_file_path: str, language: str, summary_temp: str = 'default') -> tuple:
@@ -383,7 +458,7 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
     logger.info("start get complete summary")
     base_path, ext = os.path.splitext(pdf_file_path)
     new_path = f"{base_path}.complete.{language}.{summary_temp}.txt"  # 完整的文本内容
-    first_page_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
+    first_page_path = f"{base_path}.first_page_conclusion.{language}.{summary_temp}.txt"
     result = None
     token_cost_all = 0
     # 开始处理长文本内容。
@@ -413,7 +488,7 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
 async def rewrite_paper_and_extract_information(path: str, language: str) -> tuple:
     # 先开始压缩全文信息
     logger.info(f"start rewrite paper and extract,path:{path}")
-    sentences = await get_paper_split_res(path, max_token=2048) # 基本翻了4倍
+    sentences = await get_paper_split_res(path, max_token=2048)  # 基本翻了4倍
     if len(sentences) == 0:
         raise Exception("there is no text in the paper")
     sentences_length = len(sentences)
@@ -599,6 +674,7 @@ async def translate_summary(text, lang: str) -> tuple:
     logger.info("end get paper summary translation")
     return result[0], result[3]
 
+
 async def translate_one_field(text, lang: str, field: str) -> tuple:
     logger.info(f"start translating {field}")
     convo_id = f"translate_paper_{field}_{str(gen_uuid())}"
@@ -625,6 +701,7 @@ async def translate_one_field(text, lang: str, field: str) -> tuple:
     logger.info(f"end get paper {field} translation")
     return result[0], result[3]
 
+
 async def translate(texts: dict, lang: str) -> dict:
     translated_texts = {}
     for field, text in texts.items():
@@ -632,6 +709,7 @@ async def translate(texts: dict, lang: str) -> dict:
         translated_texts[field] = translated_text[0]
 
     return translated_texts
+
 
 def truncate_text(text, max_token=2560, steps=None):
     if steps is None:
@@ -675,7 +753,7 @@ async def conclude_first_page_information(path: str, text: str,
     """
     logger.info(f"start conclude firstpage conclusion information,path:{path}")
     base_path, ext = os.path.splitext(path)
-    con_path = f"{base_path}.firstpage_conclusion.{language}.{summary_temp}.txt"
+    con_path = f"{base_path}.first_page_conclusion.{language}.{summary_temp}.txt"
     # title_path = f"{base_path}.title.txt"
     if os.path.isfile(con_path) and os.path.getsize(con_path) > 50:
         # read file
@@ -887,6 +965,7 @@ compatible with a wide range of recommendation algorithms.
     """
     res = await translate_summary(text=text, lang="中文")
     print(res)
+
 
 async def test_translate_one_field():
     # basic info
@@ -1214,6 +1293,7 @@ async def test_rewrite_paper_and_extract_information():
     print(res)
     pass
 
+
 async def test_get_the_complete_summary():
     pdf_path = '../uploads/6a2648f178c0c61f0b77e01473f85488.pdf'
     language = '中文'
@@ -1222,8 +1302,9 @@ async def test_get_the_complete_summary():
         print("file exists")
     else:
         return None
-    res = await get_the_complete_summary(pdf_path,language)
+    res = await get_the_complete_summary(pdf_path, language)
     print(res)
+
 
 async def test_get_condensed_text():
     text = """
@@ -1286,12 +1367,13 @@ Translation quality can be evaluated at different levels of granularity: word-le
 Zhao et al. 2023). In the MT community, metrics that evaluate translations at the word-level (for example, whether individual words are correct or not) are also common (Turchi et al.
 2014; Shenoy et al. 2021). Recently, there has been a tendency to compare metrics to human scores derived from fine-grained error annotations — multidimensional quality metrics (MQM) 3 (Lommel et al. 2014) — as they tend to correspond better to human professional translators (Freitag et al. 2021a). Metrics of higher granularity (e.g. word-level) provide more explanatory value than those of lower granularity, as they provide more details on which parts of the input might be translated incorrectly (e.g. Leiter 2021; Fomicheva et al. 2021, 2022). Most techniques we describe in §4 target the explainability of sentence-level metrics.
     """
-    res = await get_condensed_text(text,3)
+    res = await get_condensed_text(text, 3)
     print(res)
+
 
 if __name__ == '__main__':
     # asyncio.run(test_translate_summary())
-    asyncio.run(translate_one_field())
+    # asyncio.run(translate_one_field())
     # asyncio.run(test_Extract_title())
 
     # 测试第一页
@@ -1319,6 +1401,6 @@ if __name__ == '__main__':
     # asyncio.run(test_conclude_first_page_information())
 
     # 测试全部总结
-    # asyncio.run(test_get_the_formatted_summary_from_pdf())
+    asyncio.run(test_get_the_formatted_summary_from_pdf())
 
     pass

@@ -9,14 +9,15 @@ from pymilvus import CollectionSchema, FieldSchema, DataType
 collection_name = "PaperSummaryDocVector"
 partition_name = "Papers"
 field_name = "summary_vector"
-output_field = ["doc_id", "pdf_hash"]
+output_field = ["paper_id", "summary_vector", "pdf_hash", "sql_id"]
 
 paper_id = FieldSchema(
     name="paper_id",
     dtype=DataType.VARCHAR,
-    max_length=40,
+    max_length=64,
     is_primary=True,
 )
+
 paper_vector = FieldSchema(
     name="summary_vector",
     dtype=DataType.FLOAT_VECTOR,
@@ -66,7 +67,7 @@ async def test_insert_data(coll):
     vecs = results_json['vectors']
     hashs = results_json['pdf_hash']
 
-    insert_data = [[gen_uuid()], [vecs], [hashs]]
+    insert_data = [[gen_uuid()], [vecs], [hashs], [123]]
     res = coll.insert(data=insert_data, partition_name=partition_name, _async=True)
     coll.flush()
     print(res)

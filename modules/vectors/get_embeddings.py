@@ -13,11 +13,26 @@ import time
 
 import api_key_db
 from modules.chatmodel.openai_chat import chat_paper_api
-from modules.fileactioins.filesplit import find_next_section, split_text
+from modules.database.milvus.milvus_db import MilvusSinglePaperManager
+import milvus_config.SinglePaperConfig as Spc
+from modules.database.mysql import db
 
+from modules.fileactioins.filesplit import find_next_section, split_text
 
 from modules.util import split_list, print_token, save_data_to_json, load_data_from_json
 from modules.util import gen_uuid, retry
+
+milvus_SinglePaperManager = MilvusSinglePaperManager(host=os.getenv("MILVUS_HOST"),
+                                                     port=os.getenv("MILVUS_PORT"),
+                                                     alias="default",
+                                                     user=os.getenv("MILVUS_USER"),
+                                                     password=os.getenv("MILVUS_PASSWORD"),
+                                                     collection_name=Spc.collection_name,
+                                                     partition_name=Spc.partition_name,
+                                                     schema=Spc.schema,
+                                                     field_name=Spc.field_name,
+                                                     index_param=Spc.index_param,
+                                                     nprobe=10)
 
 if os.getenv('ENV') == 'DEV':
     is_dev = True
@@ -173,108 +188,197 @@ async def get_pdf_info(pdf_model: PDFMetaInfoModel, language: str = "English") -
     return pdf_model
 
 
-async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
-    infos = []
-    metadatas = []
+async def get_embeddings_from_pdf(path: str,
+                                  max_token: int = 256,
+                                  language: str = "English") -> tuple:
+
     pdf_hash = path.split('/')[-1].split('.')[0]
-    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
 
+    # 先检查数据库中是否存在,然后再
+    question_data = db.PaperQuestions.get_or_none(db.PaperQuestions.pdf_hash == pdf_hash,
+                                                  db.PaperQuestions.language == language,
+                                                  db.PaperQuestions.page == 1)
 
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"File {path} not found")
-    full_text = ""
-    with fitz.open(path) as doc:  # type: ignore
-        page_cnt = 0
-        for page in doc:
-            page_cnt += 1
-            text = page.get_text("text")
-            full_text += f"pdf_page:{page_cnt}\n" + text
-    # replace multiple spaces with single space
-    full_text = re.sub(r"\s+", " ", full_text)
-    # remove all leading and trailing spaces
-    full_text = full_text.strip()
-    # 优化全文切分方案：
-    split_res = await split_text(full_text, max_token=max_token)
-    last_page = 1
-    pdf_models = []
-    for info in split_res:
-        pdf_model = PDFMetaInfoModel()
-        try:
-            page_cnt = int(re.findall(r"pdf_page:(\d+)", info)[0])
-            pdf_model.page = page_cnt
-        except:
-            pdf_model.page = last_page
-            page_cnt = last_page
-        if token_str(info) > 100:
-            pdf_model.text = info
-            pdf_models.append(pdf_model)
-        last_page = page_cnt
-
-    # 提取问题，结构化文本，转换成向量
-    # 将文本，页数放在类中，然后返回list,再拆分进线程中进行结构化+向量处理
-
-    # 拆分chunks
-    if len(pdf_models) < 30:
-        num_chunks = len(pdf_models)
-    else:
-        num_chunks = int(len(pdf_models) / 30)
-
-    split_pdf_models = split_list(pdf_models, num_chunks)
-
-    pdf_info_tasks = [process_pdf_infos(sentence, language='English') for sentence in split_pdf_models]
-    results = await asyncio.gather(*pdf_info_tasks)
-    flat_results_raw = list(itertools.chain(*results))
-    flat_results_raw = [result for result in flat_results_raw if result is not None]  # 过滤掉None
-    flat_results = []
-    flag = 0
-    for res in flat_results_raw:
-        res.id = flag
-        flag += 1
-        flat_results.append(res)
-
-    info_token_cost = sum(pdf_meta.tokens for pdf_meta in flat_results)
-    logger.info(f"Info Token cost: {info_token_cost}")
-    logger.info(f"Info length: {len(flat_results)}")
-
-    if is_dev:
-        if os.path.exists(structure_path):  # 如果index存在
-            flat_results_json = await load_data_from_json(structure_path)
-            flat_results = []
-            info_token_cost = 0
-            for res in flat_results_json:
-                pdf_model = PDFMetaInfoModel()
-                pdf_model.id = res['id']
-                pdf_model.page = res['page']
-                pdf_model.structure_info = res['structure_info']
-                pdf_model.vector = res['vectors']
-                pdf_model.tokens = res['tokens']
-                pdf_model.text = res['text']
-                flat_results.append(pdf_model)
-                info_token_cost += pdf_model.tokens
-            logger.info(f"load embeddings from {structure_path}")
-            return flat_results, info_token_cost
-
-        try:
-
+    if question_data:
+        flat_paper_chunks_json = []
+        paper_chunks_data = db.PaperChunks.select().where(db.PaperChunks.pdf_hash == pdf_hash)
+        if paper_chunks_data:
+            flat_paper_chunks_json = []
             # 将list中多个数据存储到json到
-            flat_results_json = []
-            for res in flat_results:
-                flat_results_info = {
-                    "id": res.id,
+            flat_paper_chunks_json = []
+            flat_paper_questions_json = []
+            vecs = []
+            chunk_ids = []
+            pages = []
+
+            for res in paper_chunks_data:
+                flat_paper_chunks_json.append({
+                    "pdf_hash": res.pdf_hash,
                     "page": res.page,
-                    "structure_info": res.structure_info,
-                    "vectors": res.vector,
                     "text": res.text,
-                    "tokens": res.tokens,
-                }
-                flat_results_json.append(flat_results_info)
+                    "cost_tokens": res.tokens,
+                })
+                pages.append(res.page)
 
-            # 开发环境才存储
-            await save_data_to_json(flat_results_json, structure_path)
-        except Exception as e:
-            logger.error(f"save {pdf_hash}_structure.json fail {e}")
+            # flat_paper_questions_json.append({
+            #     "pdf_hash": res.pdf_hash,
+            #     "language": language,
+            #     "question": res.structure_info,
+            #     "cost_tokens": res.tokens,
+            # })
+            # vecs.append(res.vector)
+            # chunk_ids.append(res.id)
+    else:
+        structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
 
-    return flat_results, info_token_cost
+
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"File {path} not found")
+
+        full_text = ""
+        with fitz.open(path) as doc:  # type: ignore
+            page_cnt = 0
+            for page in doc:
+                page_cnt += 1
+                text = page.get_text("text")
+                full_text += f"pdf_page:{page_cnt}\n" + text
+        # replace multiple spaces with single space
+        full_text = re.sub(r"\s+", " ", full_text)
+        # remove all leading and trailing spaces
+        full_text = full_text.strip()
+        # 优化全文切分方案：
+        split_res = await split_text(full_text, max_token=max_token)
+        last_page = 1
+        pdf_models = []
+        for info in split_res:
+            pdf_model = PDFMetaInfoModel()
+            try:
+                page_cnt = int(re.findall(r"pdf_page:(\d+)", info)[0])
+                pdf_model.page = page_cnt
+            except:
+                pdf_model.page = last_page
+                page_cnt = last_page
+            if token_str(info) > 100:
+                pdf_model.text = info
+                pdf_models.append(pdf_model)
+            last_page = page_cnt
+
+        # 提取问题，结构化文本，转换成向量
+        # 将文本，页数放在类中，然后返回list,再拆分进线程中进行结构化+向量处理
+
+        # 拆分chunks
+        if len(pdf_models) < 30:
+            num_chunks = len(pdf_models)
+        else:
+            num_chunks = int(len(pdf_models) / 30)
+        logger.info(f"split pdf hash {pdf_hash}, {len(pdf_models)} chunks")
+        split_pdf_models = split_list(pdf_models, num_chunks)
+
+        pdf_info_tasks = [process_pdf_infos(sentence, language='English') for sentence in split_pdf_models]
+        results = await asyncio.gather(*pdf_info_tasks)
+        flat_results_raw = list(itertools.chain(*results))
+        flat_results_raw = [result for result in flat_results_raw if result is not None]  # 过滤掉None
+        flat_results = []
+        flag = 0
+        for res in flat_results_raw:
+            res.id = flag
+            flag += 1
+            flat_results.append(res)
+
+        info_token_cost = sum(pdf_meta.tokens for pdf_meta in flat_results)
+        logger.info(f"Info Token cost: {info_token_cost}")
+        logger.info(f"Info length: {len(flat_results)}")
+
+
+        # 需要存三个表
+        # 存paper_chunks表
+
+        # 将list中多个数据存储到json到
+        flat_paper_chunks_json = []
+        flat_paper_questions_json = []
+        vecs = []
+        chunk_ids = []
+        pages = []
+
+        for res in flat_results:
+            flat_paper_chunks_json.append({
+                "pdf_hash": pdf_hash,
+                "page": res.page,
+                "text": res.text,
+                "cost_tokens": res.tokens,
+            })
+            flat_paper_questions_json.append({
+                "pdf_hash": pdf_hash,
+                "language": language,
+                "page": res.page,
+                "question": res.structure_info,
+                "cost_tokens": res.tokens,
+            })
+            vecs.append(res.vector)
+            chunk_ids.append(res.id)
+            pages.append(res.page)
+
+
+        # 批量插入数据
+
+        paper_questions_data = db.PaperQuestions.insert_many(flat_paper_questions_json).execute()
+
+        # 执行插入操作，并获取返回的主键 ID
+        paper_chunks_insert_query = db.PaperChunks.insert_many(flat_paper_chunks_json)
+        paper_chunks_insert_query.execute()
+        paper_chunks_inserted_ids = paper_chunks_insert_query.returning(db.PaperChunks.id)
+
+        # 存paper_questions表
+        ids = milvus_SinglePaperManager.gen_uuids(len(flat_paper_questions_json))
+
+        await milvus_SinglePaperManager.insert_data(ids=ids,
+                                                    vecs=vecs,
+                                                    pdf_hash=pdf_hash,
+                                                    chunk_ids=chunk_ids,
+                                                    pages=pages,
+                                                    sql_ids=paper_chunks_inserted_ids)
+
+        return info_token_cost
+
+    # if is_dev:
+    #     if os.path.exists(structure_path):  # 如果index存在
+    #         flat_results_json = await load_data_from_json(structure_path)
+    #         flat_results = []
+    #         info_token_cost = 0
+    #         for res in flat_results_json:
+    #             pdf_model = PDFMetaInfoModel()
+    #             pdf_model.id = res['id']
+    #             pdf_model.page = res['page']
+    #             pdf_model.structure_info = res['structure_info']
+    #             pdf_model.vector = res['vectors']
+    #             pdf_model.tokens = res['tokens']
+    #             pdf_model.text = res['text']
+    #             flat_results.append(pdf_model)
+    #             info_token_cost += pdf_model.tokens
+    #         logger.info(f"load embeddings from {structure_path}")
+    #         return flat_results, info_token_cost
+    #
+    #     try:
+    #
+    #         # 将list中多个数据存储到json到
+    #         flat_results_json = []
+    #         for res in flat_results:
+    #             flat_results_info = {
+    #                 "id": res.id,
+    #                 "page": res.page,
+    #                 "structure_info": res.structure_info,
+    #                 "vectors": res.vector,
+    #                 "text": res.text,
+    #                 "tokens": res.tokens,
+    #             }
+    #             flat_results_json.append(flat_results_info)
+    #
+    #         # 开发环境才存储
+    #         await save_data_to_json(flat_results_json, structure_path)
+    #     except Exception as e:
+    #         logger.error(f"save {pdf_hash}_structure.json fail {e}")
+    #
+    # return flat_results, info_token_cost
 
     # store = FAISS.from_texts(infos, OpenAIEmbeddings(
     #     openai_api_key=key), metadatas=metadatas)
@@ -319,14 +423,14 @@ although not specifically trained for grounding, can still be used for this task
 
 
 async def test_spilit_pdf():
-    path = '../../../uploads/3047b38215263278f07178419489a887.pdf'
+    path = '../../../uploads/01addf011ab699e14c886aa8cafd4bbc.pdf'
     res = await get_embeddings_from_pdf(path, max_token=512)
     pass
 
 
 if __name__ == '__main__':
     #  测试 转向量
-    asyncio.run(test_embeedings())
+    # asyncio.run(test_embeedings())
 
     # 拆分文本
-    # asyncio.run(test_spilit_pdf())
+    asyncio.run(test_spilit_pdf())
