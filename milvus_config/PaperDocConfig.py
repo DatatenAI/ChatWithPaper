@@ -14,6 +14,7 @@ output_field = ["doc_id", "pdf_hash"]
 paper_id = FieldSchema(
     name="paper_id",
     dtype=DataType.VARCHAR,
+    max_length=40,
     is_primary=True,
 )
 paper_vector = FieldSchema(
@@ -43,8 +44,62 @@ index_param = {
     "params": {"nlist": 1024}
 }
 
+async def test_insert_data(coll):
+    from modules.util import load_data_from_json
+    import os
+    from dotenv import load_dotenv
+    from loguru import logger
+    load_dotenv()
+    from modules.util import gen_uuid
+
+    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}.json")
+    logger.info("begin load json")
+    results_json = await load_data_from_json(structure_path)
+    logger.info(f"load success")
+    vecs = results_json['vectors']
+    hashs = results_json['pdf_hash']
+
+    insert_data = [[gen_uuid()], [vecs], [hashs]]
+    res = coll.insert(data=insert_data, partition_name=partition_name, _async=True)
+    coll.flush()
+    print(res)
+
 if __name__ == "__main__":
+    from pymilvus import connections
+    from pymilvus import utility
+    from pymilvus import utility, Collection
+    from pymilvus import CollectionSchema, FieldSchema, DataType
+    import asyncio
 
+    connections.connect(
+        alias='default',
+        user='root',
+        # password='MilvusChatPaper@123',
+        password='test',
+        host='121.37.21.153',
+        port='19530'
+    )
 
+    if utility.has_collection(collection_name):
+        utility.drop_collection(collection_name)
+    # print(f"collection_name: {collection_name},{utility.has_collection(collection_name)}")
+    #
+    collection = Collection(
+        name=collection_name,
+        schema=schema,
+        using='default',
+        shards_num=2  # 集合中分片数量
+    )
+    partition = collection.create_partition(partition_name=partition_name)
+    #
+    print(collection.partitions)
+    #
+    collection.create_index(field_name=field_name, index_params=index_param)
+    print(collection.index().params)
+    collection.load()
+
+    asyncio.run(test_insert_data(collection))
+    # test insert data
     print(schema)
 

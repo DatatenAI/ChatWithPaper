@@ -21,7 +21,7 @@ chunk_vector = FieldSchema(
     name=field_name,
     dtype=DataType.FLOAT_VECTOR,
     dim=1536,
-    description='chunk ector representation of the chunk text'
+    description='chunk vector representation of the chunk text'
 )
 
 paper_hash = FieldSchema(
@@ -42,9 +42,6 @@ page = FieldSchema(
     dtype=DataType.INT64,
     description="page number in the files"
 )
-
-
-
 
 schema = CollectionSchema(
     fields=[paper_id, chunk_vector, paper_hash, chunk_id, page],
@@ -123,7 +120,7 @@ if __name__ == "__main__":
     #
     # print(collection.partitions)
     #
-    # collection.create_index(field_name="chunk_vector", index_params=index_param)
+    # collection.create_index(field_name=field_name, index_params=index_param)
     # print(collection.index().params)
     # collection.load()
 
