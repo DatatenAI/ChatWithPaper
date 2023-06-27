@@ -20,6 +20,7 @@ from modules.util import split_list, print_token, save_data_to_json, load_data_f
 from modules.util import gen_uuid, retry
 
 if os.getenv('ENV') == 'DEV':
+    is_dev = True
     load_dotenv()
 
 ENCODER = tiktoken.get_encoding("gpt2")
@@ -178,23 +179,6 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
     pdf_hash = path.split('/')[-1].split('.')[0]
     structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
 
-    if os.path.exists(structure_path):  # 如果index存在
-        flat_results_json = await load_data_from_json(structure_path)
-        flat_results = []
-        info_token_cost = 0
-        for res in flat_results_json:
-            pdf_model = PDFMetaInfoModel()
-            pdf_model.id = res['id']
-            pdf_model.page = res['page']
-            pdf_model.structure_info = res['structure_info']
-            pdf_model.vector = res['vectors']
-            pdf_model.tokens = res['tokens']
-            pdf_model.text = res['text']
-            flat_results.append(pdf_model)
-            info_token_cost += pdf_model.tokens
-        logger.info(f"load embeddings from {structure_path}")
-        return flat_results, info_token_cost
-
 
     if not os.path.exists(path):
         raise FileNotFoundError(f"File {path} not found")
@@ -251,23 +235,43 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
     info_token_cost = sum(pdf_meta.tokens for pdf_meta in flat_results)
     logger.info(f"Info Token cost: {info_token_cost}")
     logger.info(f"Info length: {len(flat_results)}")
-    try:
-        # 将list中多个数据存储到json到
-        flat_results_json = []
-        for res in flat_results:
-            flat_results_info = {
-                "id": res.id,
-                "page": res.page,
-                "structure_info": res.structure_info,
-                "vectors": res.vector,
-                "text": res.text,
-                "tokens": res.tokens,
-            }
-            flat_results_json.append(flat_results_info)
 
-        await save_data_to_json(flat_results_json, structure_path)
-    except Exception as e:
-        logger.error(f"save {pdf_hash}_structure.pkl fail {e}")
+    if is_dev:
+        if os.path.exists(structure_path):  # 如果index存在
+            flat_results_json = await load_data_from_json(structure_path)
+            flat_results = []
+            info_token_cost = 0
+            for res in flat_results_json:
+                pdf_model = PDFMetaInfoModel()
+                pdf_model.id = res['id']
+                pdf_model.page = res['page']
+                pdf_model.structure_info = res['structure_info']
+                pdf_model.vector = res['vectors']
+                pdf_model.tokens = res['tokens']
+                pdf_model.text = res['text']
+                flat_results.append(pdf_model)
+                info_token_cost += pdf_model.tokens
+            logger.info(f"load embeddings from {structure_path}")
+            return flat_results, info_token_cost
+
+        try:
+            # 将list中多个数据存储到json到
+            flat_results_json = []
+            for res in flat_results:
+                flat_results_info = {
+                    "id": res.id,
+                    "page": res.page,
+                    "structure_info": res.structure_info,
+                    "vectors": res.vector,
+                    "text": res.text,
+                    "tokens": res.tokens,
+                }
+                flat_results_json.append(flat_results_info)
+
+            # 开发环境才存储
+            await save_data_to_json(flat_results_json, structure_path)
+        except Exception as e:
+            logger.error(f"save {pdf_hash}_structure.json fail {e}")
 
     return flat_results, info_token_cost
 
@@ -321,7 +325,7 @@ async def test_spilit_pdf():
 
 if __name__ == '__main__':
     #  测试 转向量
-    # asyncio.run(test_embeedings())
+    asyncio.run(test_embeedings())
 
     # 拆分文本
-    asyncio.run(test_spilit_pdf())
+    # asyncio.run(test_spilit_pdf())

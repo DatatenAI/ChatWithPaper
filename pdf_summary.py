@@ -306,6 +306,7 @@ async def get_the_formatted_summary_from_pdf(
             }, ensure_ascii=False, indent=4)
             pdf_vec, vec_tokens = await embed_text(meta_data)
             token_cost_all += vec_tokens
+
             # 存入json文件中
             pdf_vec_info = {
                 "pdf_hash": pdf_hash,

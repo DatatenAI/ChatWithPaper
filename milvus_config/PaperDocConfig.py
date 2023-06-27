@@ -12,8 +12,8 @@ field_name = "summary_vector"
 output_field = ["doc_id", "pdf_hash"]
 
 paper_id = FieldSchema(
-    name="doc_id",
-    dtype=DataType.INT64,
+    name="paper_id",
+    dtype=DataType.VARCHAR,
     is_primary=True,
 )
 paper_vector = FieldSchema(
@@ -22,6 +22,7 @@ paper_vector = FieldSchema(
     dim=1536,
     description='vector representation of the summary'
 )
+
 paper_hash = FieldSchema(
     name="pdf_hash",
     dtype=DataType.VARCHAR,

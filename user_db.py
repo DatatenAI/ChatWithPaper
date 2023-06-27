@@ -11,7 +11,7 @@ async def update_points_add(user_id: str,
                             consumed_type: str):
     try:
         with db.mysql_db_new.atomic():
-            db.Users.update(credits=db.Users.credits + points_consumed).where(db.Users.id == user_id).execute()
+            db.Users.update(credit=db.Users.credit + points_consumed).where(db.Users.id == user_id).execute()
             logger.info(f"user:{user_id} consumed points {points_consumed}")
             db.CreditHistories.create(user_id=user_id,
                                       amount=points_consumed,
@@ -19,7 +19,6 @@ async def update_points_add(user_id: str,
     except Exception as e:
         logger.error(f"update points ")
         raise Exception(e)
-
 
 async def update_token_consumed_paid(user_id: str,
                                      token_consumed_increase: float):

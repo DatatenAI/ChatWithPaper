@@ -71,8 +71,6 @@ def delete_wrong_summary_res(pdf_hash: str, language: str, summary_temp: str):
         delete_wrong_file(brief_intro_path, 100)
 
 
-
-
 from pydantic import BaseModel
 
 
@@ -130,6 +128,7 @@ async def process_summary(task_data):
     user_type = task_data['user_type']
     user_id = task_data['user_id']
     pages = task_data['pages']
+    task_id = task_data['task_id']
     # 总结逻辑
     logger.info(f"user id {user_id}")
 
@@ -152,6 +151,10 @@ async def process_summary(task_data):
         vec_split_task = get_embeddings_from_pdf(pdf_path, max_token=512)
         summary_task = summary(summary_data=summary_data)
         vec_split_data, res_data = await asyncio.gather(vec_split_task, summary_task)
+        # TODO 添加进向量数据库中
+
+
+
 
     except Exception as e:
         logger.error(f"generate summary error:{e}", )
@@ -162,10 +165,7 @@ async def process_summary(task_data):
             task_obj = db.SubscribeTasks.update(state='FAIL',
                                                 tokens=0,
                                                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                                ).where(
-                db.SubscribeTasks.pdf_hash == pdf_hash,
-                db.SubscribeTasks.type == task_data['task_type'],
-                db.SubscribeTasks.language == task_data['language']).execute()
+                                                ).where(db.SubscribeTasks.id == task_id).execute()
             logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
 
         elif user_type == 'user':
@@ -176,10 +176,7 @@ async def process_summary(task_data):
                 cost_credits=0,
                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ).where(
-                db.UserTasks.user_id == task_data['user_id'],
-                db.UserTasks.pdf_hash == pdf_hash,
-                db.UserTasks.language == task_data['language'],
-                db.UserTasks.type == task_data['task_type'],
+                db.UserTasks.id == task_id
             ).execute()
             logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
             # 还钱
@@ -226,8 +223,6 @@ async def process_summary(task_data):
                 logger.info(f"add summaries id={obj}, pdf_hash={pdf_hash}, language={task_data['language']}")
             else:
                 logger.info(f"update summaries id={obj}, pdf_hash={pdf_hash}")
-            # TODO 添加进向量数据库中
-
 
         except Exception as e:
             logger.error(f"{e}")
@@ -246,7 +241,7 @@ async def process_summary(task_data):
                 db.UserTasks.pdf_hash == pdf_hash,
                 db.UserTasks.language == task_data['language'],
                 db.UserTasks.type == task_data['task_type'],
-                ).execute()
+            ).execute()
             logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
             # 添加进summaries
             summary_obg = db.Summaries.create(
@@ -266,9 +261,6 @@ async def process_summary(task_data):
             logger.error(f"{e}")
 
     return None
-
-
-
 
 
 async def testUserTask():
@@ -296,10 +288,11 @@ async def test_SubTask():
         res = await process_summary(task_data)
         print(res)
 
+
 async def test_summary():
     summary_data = SummaryData(
-        user_type= 'spider',
-        pdf_hash= '3047b38215263278f07178419489a887',
+        user_type='spider',
+        pdf_hash='3047b38215263278f07178419489a887',
         language='中文',
         summary_temp='default1'
     )
@@ -307,9 +300,9 @@ async def test_summary():
     print(summary_res)
     pass
 
+
 if __name__ == '__main__':
     asyncio.run(test_SubTask())
-
 
     # 测试 summary
     # asyncio.run(test_summary())

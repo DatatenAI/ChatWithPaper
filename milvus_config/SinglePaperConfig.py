@@ -43,6 +43,9 @@ page = FieldSchema(
     description="page number in the files"
 )
 
+
+
+
 schema = CollectionSchema(
     fields=[paper_id, chunk_vector, paper_hash, chunk_id, page],
     description="Paper Vector Database"
@@ -52,6 +55,10 @@ index_param = {
     "metric_type": "IP",
     "index_type": "IVF_FLAT",
     "params": {"nlist": 1024}
+}
+
+pdf_hash_index = {
+
 }
 
 
@@ -104,21 +111,21 @@ if __name__ == "__main__":
 
     if utility.has_collection(collection_name):
         utility.drop_collection(collection_name)
-    print(f"collection_name: {collection_name},{utility.has_collection(collection_name)}")
-
+    # print(f"collection_name: {collection_name},{utility.has_collection(collection_name)}")
+    #
     collection = Collection(
         name=collection_name,
         schema=schema,
         using='default',
         shards_num=2  # 集合中分片数量
     )
-    partition = collection.create_partition(partition_name=partition_name)
-
-    print(collection.partitions)
-
-    collection.create_index(field_name="chunk_vector", index_params=index_param)
-    print(collection.index().params)
-    collection.load()
+    # partition = collection.create_partition(partition_name=partition_name)
+    #
+    # print(collection.partitions)
+    #
+    # collection.create_index(field_name="chunk_vector", index_params=index_param)
+    # print(collection.index().params)
+    # collection.load()
 
     asyncio.run(test_insert_data(collection))
     # test insert data

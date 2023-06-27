@@ -39,55 +39,12 @@ class RequestParams(BaseModel):
 async def invoke(params: Request):
     task_id = params.query_params.get('task_id')
     user_type = params.query_params.get('user_type')
-    if user_type == 'user':
-        logger.info(f"task_id:{task_id}, user_type:{user_type}")
-        try:
-            task = db.UserTasks.get_by_id(task_id)     # 从用户的任务表中取数据
-            logger.info("begin user summary")
-            dumps = json.dumps({
-                "user_type": user_type,
-                "task_id": task_id,
-                "task_type": task.type,
-                "language": task.language,
-                "user_id": task.user_id,
-                "pages": task.pages,
-                "pdf_hash": task.pdf_hash,
-                "summary_temp": 'default'
-            }, ensure_ascii=False)
-            threading.Thread(target=handler, args=(dumps,)).start()
-            return 'success'
-        except Exception as e:
-            logger.error(f'sql error, user task_id:{task_id} {e}')
+    dumps = json.dumps({
+        "task_id": task_id,
+        "user_type": user_type,
+    })
 
-    elif user_type == 'spider':
-        logger.info(f"task_id:{task_id}, user_type:{user_type}")
-        # 读取特定task_id行的数据
-        try:
-            task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)
-            if task.type.lower() == 'summary':  # 总结的任务
-                logger.info("begin spider summary")
-                dumps = json.dumps({
-                    "user_id": 'chat-paper',
-                    "user_type": user_type,
-                    "task_id": task_id,
-                    "task_type": task.type,
-                    "language": task.language,
-                    "pages": task.pages,
-                    "pdf_hash": task.pdf_hash,
-                    "summary_temp": 'default'  # 总结模板
-                }, ensure_ascii=False)
-                threading.Thread(target=handler, args=(dumps,), daemon=True).start()
-                return 'success'
-            elif task.type.lower() == 'translate':  # 翻译的任务
-                return 'success'
-            else:
-                return 'success'
-        except Exception as e:
-            logger.error(f'sql error, spider task_id:{task_id} {e}')
-    else:
-        return 'error user type, need user|spider'
-
-
+    threading.Thread(target=handler, args=(dumps,)).start()
     # 在这里执行相应的任务处理逻辑
     # 可以根据传入的参数进行相应的操作
 

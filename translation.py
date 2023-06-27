@@ -98,6 +98,7 @@ async def process_translate(task_data):
                 logger.info(f'translate fields of summary, pdf_hash: {pdf_hash}')
 
     except Exception as e:
+
         logger.error(f"{e}")
 
 async def test_process_translate():

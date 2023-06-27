@@ -4,7 +4,7 @@ from typing import List
 
 from dotenv import load_dotenv
 
-from modules.util import gen_uuid
+from modules.util import gen_uuid, load_data_from_json
 
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
@@ -81,9 +81,13 @@ class MilvusPaperDocManager:
                     shards_num=2  # 集合中分片数量
                 )
                 partition = collection.create_partition(partition_name=self.partition_name)
-                collection.create_index(field_name=self.field_name, index_params=self.index_param)
+                collection.create_index(field_name=self.field_name, index_params=self.index_param,
+                                        partition=self.partition_name)
+                collection.create_index(field_name='pdf_hash', index_name="scalar_index", partition=self.partition_name)
+                collection.create_index(field_name='pdf_hash', index_name="scalar_index", partition=self.partition_name)
+
             except Exception as e:
-                print(e)
+                logger.error(e)
             return Collection(name=self.collection_name)
 
     def delete_collection(self):
@@ -99,10 +103,39 @@ class MilvusPaperDocManager:
             logger.error(f"{e}")
         return False
 
-    def insert_vectors(self, vectors, ids):
-        collection = Collection(self.collection_name)
-        collection.insert([self.field_name], vectors, ids)
-        print("Vectors inserted successfully.")
+    def gen_uuids(self, num: int):
+        """
+        产生多个uuid
+        """
+        ids = []
+        for i in range(num):
+            ids.append(gen_uuid())
+        return ids
+
+    async def insert_data(self, vecs: List[float], pdf_hash: str):
+        """
+        插入向量 ,分段 和pages id
+        """
+        try:
+            logger.info(f"begin insert vec")
+            data = [self.gen_uuids(1), [vecs], [pdf_hash]]
+            res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
+            self.collection.flush()
+            logger.info(f"end insert {self.collection_name},pdf_hash: {pdf_hash} vector data")
+        except Exception as e:
+            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
+            raise e
+        return res.result()
+
+    async def insert_json_data(self, structure_path: str, pdf_hash: str):
+        # TODO
+        """
+        直接把structure.json文件进行加载后上传
+        """
+        flat_results_json = await load_data_from_json(structure_path)
+        vec = flat_results_json['vectors']
+        res = await self.insert_data(vec, pdf_hash)
+        return res
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
@@ -119,13 +152,50 @@ class MilvusPaperDocManager:
                                                _async=True)
         results = search_future.result()
         if len(results[0]) > 0:
-            logger.info(f"Vectors searched, result: {[res.id for res in results[0]]}, distance:{12}")
-        return results
+            logger.info(f"Vectors searched, result dis: {[res.distance for res in results[0]]}")
+        return results[0]
 
-    def update_vectors(self, vectors: List[List[float]], ids: List[int]):
-        collection = Collection(self.collection_name)
-        collection.update(ids, vectors, [self.field_name])
-        print("Vectors updated successfully.")
+    async def search_by_vector_hash(self, pdf_hash: str, query_vector: List[float], top_k: int = 5):
+        """
+        从指定PDF中搜索数据
+        """
+        search_param = {
+            "metric_type": "IP",
+            "params": {"nprobe": self.nprobe}
+        }
+        search_future = self.collection.search(data=[query_vector],
+                                               anns_field=self.field_name,
+                                               param=search_param,
+                                               limit=top_k,
+                                               expr=f"pdf_hash == \"{pdf_hash}\"",
+                                               partition_names=[self.partition_name] if self.partition_name else None,
+                                               output_fields=self.output_field, _async=True)
+
+        return search_future.result()[0]
+
+    async def search_ids_by_pdf_hash(self, pdf_hash: str):
+        """
+        通过ids
+        """
+        result = await self.search_by_vector_hash(
+            pdf_hash=pdf_hash,
+            query_vector=[0.5] * 1536,
+            top_k=2
+        )
+        ids = [res.id for res in result]
+        return ids
+
+    async def delete_by_hash(self, pdf_hash: str):
+        # 搜索满足条件的向量的 ID
+        try:
+            ids = await self.search_ids_by_pdf_hash(pdf_hash)
+
+            expr = f"paper_id in {ids}"
+            status = self.collection.delete(expr=expr, partition_name=self.partition_name)
+            logger.info(f"Data deleted successfully, pdf_hash:{pdf_hash}, {status.delete_count} datas")
+        except Exception as e:
+            logger.error(f"Failed to delete data. Error:{e}")
+
 
 class MilvusSinglePaperManager:
     def __init__(self,
@@ -174,9 +244,12 @@ class MilvusSinglePaperManager:
                     shards_num=2  # 集合中分片数量
                 )
                 partition = collection.create_partition(partition_name=self.partition_name)
-                collection.create_index(field_name=self.field_name, index_params=self.index_param)
+                collection.create_index(field_name=self.field_name, index_params=self.index_param, partition=self.partition_name)
+                collection.create_index(field_name='pdf_hash', index_name="scalar_index", partition=self.partition_name)
+
+
             except Exception as e:
-                print(e)
+                logger.error(e)
             return Collection(name=self.collection_name)
 
     def delete_collection(self):
@@ -200,18 +273,36 @@ class MilvusSinglePaperManager:
         for i in range(num):
             ids.append(gen_uuid())
         return ids
-    def insert_data(self,vecs:List[List[float]], pdf_hash:str, chunk_ids:List[int],pages:List[int]):
+
+    async def insert_data(self, vecs: List[List[float]], pdf_hash: str, chunk_ids: List[int], pages: List[int]):
+        """
+        插入向量 ,分段 和pages id
+        """
         try:
+            logger.info(f"begin insert vec")
             num_vec = len(chunk_ids)
-            data = [self.gen_uuids(num_vec), vecs, [pdf_hash]*num_vec, chunk_ids, pages]
+            data = [self.gen_uuids(num_vec), vecs, [pdf_hash] * num_vec, chunk_ids, pages]
             res = self.collection.insert(data=data, partition_name=self.partition_name, _async=True)
             self.collection.flush()
+            logger.info(f"end insert {self.collection_name}, pdf_hash: {pdf_hash}, {num_vec} vector data")
         except Exception as e:
             logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
             raise e
-
-    def insert_json_data(self,json_path):
-        pass
+        return res.result()
+    async def insert_json_data(self, structure_path: str, pdf_hash: str):
+        """
+        直接把structure.json文件进行加载后上传
+        """
+        flat_results_json = await load_data_from_json(structure_path)
+        vecs = []
+        chunk_ids = []
+        pages = []
+        for res in flat_results_json:
+            vecs.append(res['vectors'])
+            chunk_ids.append(res['id'])
+            pages.append(res['page'])
+        res = await self.insert_data(vecs, pdf_hash, chunk_ids, pages)
+        return res
 
     def search_vectors(self, query_vector: List[float], top_k: int):
         search_param = {
@@ -228,15 +319,48 @@ class MilvusSinglePaperManager:
                                                _async=True)
         results = search_future.result()
         if len(results[0]) > 0:
-            logger.info(f"Vectors searched, result: {[res.id for res in results[0]]}")
+            logger.info(f"Vectors searched, result dis: {[res.distance for res in results[0]]}")
         return results[0]
-
-    def search_vectors_pdf(self,pdf_hash:str,query_vector: List[float], top_k: int):
+    async def search_by_vector_hash(self, pdf_hash: str, query_vector: List[float], top_k: int =5):
         """
         从指定PDF中搜索数据
         """
+        search_param = {
+            "metric_type": "IP",
+            "params": {"nprobe": self.nprobe}
+        }
+        search_future = self.collection.search(data=[query_vector],
+                                               anns_field=self.field_name,
+                                               param=search_param,
+                                               limit=top_k,
+                                               expr=f"pdf_hash == \"{pdf_hash}\"",
+                                               partition_names=[self.partition_name] if self.partition_name else None,
+                                               output_fields=self.output_field, _async=True)
 
-        pass
+        return search_future.result()[0]
+
+    async def search_ids_by_pdf_hash(self, pdf_hash: str):
+        """
+        通过ids
+        """
+        result = await self.search_by_vector_hash(
+            pdf_hash=pdf_hash,
+            query_vector=[0.5]*1536,
+            top_k=100
+        )
+        ids = [res.id for res in result]
+        return ids
+
+    async def delete_by_hash(self, pdf_hash: str):
+        # 搜索满足条件的向量的 ID
+        try:
+            ids = await self.search_ids_by_pdf_hash(pdf_hash)
+
+            expr = f"paper_id in {ids}"
+            status = self.collection.delete(expr=expr, partition_name=self.partition_name)
+            logger.info(f"Data deleted successfully, pdf_hash:{pdf_hash}, {status.delete_count} datas")
+        except Exception as e:
+            logger.error(f"Failed to delete data. Error:{e}")
 
 
     def update_vectors(self, vectors: List[List[float]], ids: List[int]):
@@ -245,7 +369,28 @@ class MilvusSinglePaperManager:
         """
         pass
 
-async def test():
+
+async def test_paper():
+    manager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
+                                       port=os.getenv("MILVUS_PORT"),
+                                       alias="default",
+                                       user=os.getenv("MILVUS_USER"),
+                                       password=os.getenv("MILVUS_PASSWORD"),
+                                       collection_name=Pdc.collection_name,
+                                       partition_name=Pdc.partition_name,
+                                       schema=Pdc.schema,
+                                       field_name=Pdc.field_name,
+                                       index_param=Pdc.index_param,
+                                       nprobe=10)
+    # 搜索向量
+    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
+
+    # 插入数据
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}.json")
+    res = await manager.insert_json_data(structure_path, pdf_hash)
+    print(res)
+
+async def test_single():
     manager = MilvusSinglePaperManager(host=os.getenv("MILVUS_HOST"),
                                        port=os.getenv("MILVUS_PORT"),
                                        alias="default",
@@ -257,15 +402,25 @@ async def test():
                                        field_name=Spc.field_name,
                                        index_param=Spc.index_param,
                                        nprobe=10)
-
     # 搜索向量
-    query = "methods"
-    query_vector = await embed_text(query)
-    top_k = 10
-    res = manager.search_vectors(query_vector, top_k)
+    pdf_hash = '8545e8885f13b7bfa803e71e4c1b3ac9'
+
+    # 插入数据
+    structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
+    res = await manager.insert_json_data(structure_path, pdf_hash)
+
+    # query = "methods"
+    # query_vector, token_cost = await embed_text(query)
+    # top_k = 10
+    # res1 = manager.search_vectors(query_vector, top_k)
+
+    res2 = await manager.delete_by_hash(pdf_hash=pdf_hash)
+    print(res)
 
 if __name__ == "__main__":
     # 示例用法
 
-    print(res)
 
+    # asyncio.run(test_single())
+
+    asyncio.run(test_paper())

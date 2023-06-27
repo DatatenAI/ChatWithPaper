@@ -46,6 +46,7 @@ def get_single_alive_key() -> Union[str, None]:
 def test():
 
     apikey = get_single_alive_key()
+    print(apikey)
 
 
 if __name__ == '__main__':
