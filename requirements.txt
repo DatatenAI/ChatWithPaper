@@ -1,5 +1,6 @@
 pymupdf==1.22.3
 aioredis==2.0.1
+aiohttp==3.8.4
 loguru==0.7.0
 peewee==3.16.2
 tiktoken==0.4.0
@@ -13,3 +14,4 @@ fastapi==0.98.0
 langchain==0.0.214
 uvicorn==0.22.0
 openai==0.27.8
+pymilvus==2.2.8

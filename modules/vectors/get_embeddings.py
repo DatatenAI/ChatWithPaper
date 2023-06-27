@@ -255,6 +255,7 @@ async def get_embeddings_from_pdf(path: str, max_token: int = 256) -> tuple:
             return flat_results, info_token_cost
 
         try:
+
             # 将list中多个数据存储到json到
             flat_results_json = []
             for res in flat_results:
