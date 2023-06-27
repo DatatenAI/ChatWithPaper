@@ -1,9 +1,12 @@
 import asyncio
+import datetime
 import json
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
+
+import user_db
 
 if os.getenv('ENV') == 'DEV':
     load_dotenv()
@@ -66,9 +69,13 @@ async def process_translate(task_data):
     """
     translate的处理逻辑
     """
+    pdf_hash = task_data['pdf_hash']
     user_type = task_data['user_type']
     user_id = task_data['user_id']
+    task_id = task_data['task_id']
+    pages = task_data['pages']
 
+    logger.info(f"process translate user id {user_id}")
     try:
         earliest_created_task = (
             db.UserTasks.select()
@@ -95,6 +102,35 @@ async def process_translate(task_data):
                 logger.info(f'translate fields of summary, pdf_hash: {pdf_hash}')
 
     except Exception as e:
+        # 还钱
+        if user_type == 'spider':
+            # TODO 写报错信息和改变状态
+            task_obj = db.SubscribeTasks.update(state='FAIL',
+                                                tokens=0,
+                                                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                                ).where(db.SubscribeTasks.id == task_id).execute()
+            logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
+
+        elif user_type == 'user':
+            # 写报错信息
+            task_obj = db.UserTasks.update(
+                user_id=task_data['user_id'],
+                state='FAIL',
+                cost_credits=0,
+                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ).where(
+                db.UserTasks.id == task_id
+            ).execute()
+            logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
+            # 还钱
+            try:
+                await user_db.update_points_add(user_id, pages, 'TASK')
+                logger.info(f"give back user {user_id}, points {pages} success")
+            except Exception as e:
+                logger.error(f"give back user {user_id}, points {pages} fail {e}")
+                raise Exception(e)
+        raise e
+
 
         logger.error(f"{e}")
 

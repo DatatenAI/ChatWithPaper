@@ -318,13 +318,13 @@ async def get_embeddings_from_pdf(path: str,
             chunk_ids.append(res.id)
             pages.append(res.page)
 
-        # 批量插入数据
-
+        # 批量插入数据,问题数据
         paper_questions_data = db.PaperQuestions.insert_many(flat_paper_questions_json).execute()
 
         def sort_by_second_element(lst):
             sorted_lst = sorted(lst, key=lambda x: x[1])
             return sorted_lst
+
 
         # 执行插入操作，并获取返回的主键 ID
         paper_chunks_obj = db.PaperChunks.insert_many(flat_paper_chunks_json).execute()
@@ -334,7 +334,7 @@ async def get_embeddings_from_pdf(path: str,
             for res in paper_chunks_inserted_get:
                 id_chunks.append([res.id, res.chunk_id])
             id_chunks = sort_by_second_element(id_chunks)
-            paper_chunks_inserted_ids = [res[0] for res in id_chunks]
+            paper_chunks_inserted_ids = [res[0] for res in id_chunks]   # 得到sql id
         else:
             raise Exception(f"no paper_chunks data,pdf_hash={pdf_hash}")
 
