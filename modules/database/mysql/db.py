@@ -137,6 +137,7 @@ class PaperQuestions(BaseModelNew):
 
 class PaperChunks(BaseModelNew):
     id = AutoField()
+    chunk_id = IntegerField()
     pdf_hash = CharField()
     page = IntegerField()   # 页码，chunk出来的页码
     text = TextField()      # 拆分出来的

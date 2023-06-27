@@ -190,15 +190,14 @@ async def get_pdf_info(pdf_model: PDFMetaInfoModel, language: str = "English") -
 
 async def get_embeddings_from_pdf(path: str,
                                   max_token: int = 256,
-                                  language: str = "English") -> tuple:
-
+                                  language: str = "English") -> float:
     pdf_hash = path.split('/')[-1].split('.')[0]
 
     # 先检查数据库中是否存在,然后再
     question_data = db.PaperQuestions.get_or_none(db.PaperQuestions.pdf_hash == pdf_hash,
                                                   db.PaperQuestions.language == language,
                                                   db.PaperQuestions.page == 1)
-
+    info_token_cost = 0
     if question_data:
         flat_paper_chunks_json = []
         paper_chunks_data = db.PaperChunks.select().where(db.PaperChunks.pdf_hash == pdf_hash)
@@ -218,6 +217,7 @@ async def get_embeddings_from_pdf(path: str,
                     "text": res.text,
                     "cost_tokens": res.tokens,
                 })
+                info_token_cost += res.tokens
                 pages.append(res.page)
 
             # flat_paper_questions_json.append({
@@ -228,9 +228,9 @@ async def get_embeddings_from_pdf(path: str,
             # })
             # vecs.append(res.vector)
             # chunk_ids.append(res.id)
+        return info_token_cost
     else:
         structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
-
 
         if not os.path.exists(path):
             raise FileNotFoundError(f"File {path} not found")
@@ -289,7 +289,6 @@ async def get_embeddings_from_pdf(path: str,
         logger.info(f"Info Token cost: {info_token_cost}")
         logger.info(f"Info length: {len(flat_results)}")
 
-
         # 需要存三个表
         # 存paper_chunks表
 
@@ -305,6 +304,7 @@ async def get_embeddings_from_pdf(path: str,
                 "pdf_hash": pdf_hash,
                 "page": res.page,
                 "text": res.text,
+                "chunk_id": res.id,
                 "cost_tokens": res.tokens,
             })
             flat_paper_questions_json.append({
@@ -318,15 +318,25 @@ async def get_embeddings_from_pdf(path: str,
             chunk_ids.append(res.id)
             pages.append(res.page)
 
-
         # 批量插入数据
 
         paper_questions_data = db.PaperQuestions.insert_many(flat_paper_questions_json).execute()
 
+        def sort_by_second_element(lst):
+            sorted_lst = sorted(lst, key=lambda x: x[1])
+            return sorted_lst
+
         # 执行插入操作，并获取返回的主键 ID
-        paper_chunks_insert_query = db.PaperChunks.insert_many(flat_paper_chunks_json)
-        paper_chunks_insert_query.execute()
-        paper_chunks_inserted_ids = paper_chunks_insert_query.returning(db.PaperChunks.id)
+        paper_chunks_obj = db.PaperChunks.insert_many(flat_paper_chunks_json).execute()
+        if paper_chunks_obj:
+            paper_chunks_inserted_get = db.PaperChunks.select().where(db.PaperChunks.pdf_hash == pdf_hash)
+            id_chunks = []
+            for res in paper_chunks_inserted_get:
+                id_chunks.append([res.id, res.chunk_id])
+            id_chunks = sort_by_second_element(id_chunks)
+            paper_chunks_inserted_ids = [res[0] for res in id_chunks]
+        else:
+            raise Exception(f"no paper_chunks data,pdf_hash={pdf_hash}")
 
         # 存paper_questions表
         ids = milvus_SinglePaperManager.gen_uuids(len(flat_paper_questions_json))
@@ -423,7 +433,7 @@ although not specifically trained for grounding, can still be used for this task
 
 
 async def test_spilit_pdf():
-    path = '../../../uploads/01addf011ab699e14c886aa8cafd4bbc.pdf'
+    path = '../../../uploads/3f1e2d8856682601bcfb10aaf2cac565.pdf'
     res = await get_embeddings_from_pdf(path, max_token=512)
     pass
 
