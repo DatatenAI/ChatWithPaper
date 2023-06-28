@@ -63,7 +63,9 @@ async def translate(translate_data: TranslateData) -> dict:
 
 
     except Exception as e:
-        logger.error(f"translate error:{e}")
+        logger.error(f"translate error:{repr(e)}")
+        raise e
+
 
 async def process_translate(task_data):
     """
@@ -74,20 +76,18 @@ async def process_translate(task_data):
     user_id = task_data['user_id']
     task_id = task_data['task_id']
     pages = task_data['pages']
+    language = task_data['language']
 
     logger.info(f"process translate user id {user_id}")
     try:
         earliest_created_task = (
             db.UserTasks.select()
-            .where(db.UserTasks.state == 'RUNNING')
+            .where(db.UserTasks.pdf_hash == pdf_hash,db.UserTasks.state == 'SUCCESS')
             .order_by(db.UserTasks.created_at)
             .first()
         )
 
         if earliest_created_task:
-            pdf_hash = earliest_created_task.pdf_hash
-            language = earliest_created_task.language
-
             translate_data = TranslateData(
                 user_type=user_type,
                 pdf_hash=pdf_hash,

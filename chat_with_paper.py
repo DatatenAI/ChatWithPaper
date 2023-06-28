@@ -39,11 +39,11 @@ def handler(event_str):
                 }
                 if task.type.lower() == 'summary':
                     asyncio.run(process_summary(dumps))
-                elif task_data['task_type'].lower() == 'translate':
+                elif task.type.lower() == 'translate':
                     asyncio.run(process_translate(dumps))
                 return 'success'
             except Exception as e:
-                logger.error(f'sql error, user task_id:{task_id} {e}')
+                logger.error(f'sql error, user task_id:{task_id} {repr(e)}')
 
         elif user_type == 'spider':
             logger.info(f"task_id:{task_id}, user_type:{user_type}")

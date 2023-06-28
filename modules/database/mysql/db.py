@@ -63,7 +63,7 @@ class Users(BaseModelNew):
     email_verified = DateTimeField()
     image = CharField()
     password = CharField()
-    credit = FloatField()
+    credits = FloatField()
     class Meta:
         table_name = 'users'
 

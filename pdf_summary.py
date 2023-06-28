@@ -159,7 +159,7 @@ async def get_title_brief_info(first_page: str, final_res: str, language: str = 
         if isinstance(res, tuple):
             return res
         else:
-            raise Exception("No summary found")
+            raise Exception("No summary found 2")
 
     async def process_basic():
         res_basic = await process_text(From_FirstPage_Extract_BasicInfo, first_page, language)
@@ -206,7 +206,7 @@ async def get_title_brief_info(first_page: str, final_res: str, language: str = 
     if title and title_zh and basic_info and brief_intro:
         return title, title_zh, basic_info, brief_intro, token_cost
     else:
-        raise Exception("No summary found")
+        raise Exception("No summary found 3")
     pass
 
 
@@ -327,7 +327,7 @@ async def get_the_formatted_summary_from_pdf(
             token_cost_all += token_cost
 
             if not isinstance(summary_res, str):
-                raise Exception("No summary found")
+                raise Exception("No summary found 4")
 
             # 如果不够稳定的话，可以用chat做完整的替代，这个成本应该不高，但是应该比较慢
             # 在这里将基本信息和总结信息拼接起来：
@@ -532,7 +532,7 @@ async def get_paper_final_summary(text: str,
         if isinstance(res, tuple):
             return res
         else:
-            raise Exception("No summary found")
+            raise Exception("No summary found 1")
 
     content = await process_text(get_paper_summary, text, language)
 
@@ -544,7 +544,7 @@ async def get_paper_final_summary(text: str,
         res = re.sub(r'\\+n', '\n', res)
         return res, token_cost
     else:
-        raise Exception("No summary found")
+        raise Exception("No summary found 5")
 
 
 async def get_paper_summary(text, lang: str) -> tuple:
@@ -1282,7 +1282,7 @@ async def test_get_paper_split_res():
 
 
 async def test_rewrite_paper_and_extract_information():
-    pdf_path = '../uploads/6a2648f178c0c61f0b77e01473f85488.pdf'
+    pdf_path = '/temp/uploads/365fb87068e14e5e3fea64253d9d3c8b.pdf'
     language = '中文'
     summary_temp = 'default'
     if os.path.exists(pdf_path):
@@ -1295,7 +1295,7 @@ async def test_rewrite_paper_and_extract_information():
 
 
 async def test_get_the_complete_summary():
-    pdf_path = '../uploads/6a2648f178c0c61f0b77e01473f85488.pdf'
+    pdf_path = '/temp/uploads/365fb87068e14e5e3fea64253d9d3c8b.pdf'
     language = '中文'
     summary_temp = 'default'
     if os.path.exists(pdf_path):
@@ -1380,7 +1380,7 @@ if __name__ == '__main__':
     # asyncio.run(test_get_the_complete_summary())
 
     #
-    # asyncio.run(test_rewrite_paper_and_extract_information())
+    asyncio.run(test_rewrite_paper_and_extract_information())
 
     # 测试压缩信息
     # asyncio.run(test_get_condensed_text())
@@ -1401,6 +1401,6 @@ if __name__ == '__main__':
     # asyncio.run(test_conclude_first_page_information())
 
     # 测试全部总结
-    asyncio.run(test_get_the_formatted_summary_from_pdf())
+    # asyncio.run(test_get_the_formatted_summary_from_pdf())
 
     pass

@@ -106,8 +106,10 @@ async def embed_text(text: str, max_attempts: int = 3) -> tuple:
     while attempts < max_attempts:
         try:
             alive_key = api_key_db.get_single_alive_key()
+            logger.info(f"start query embedding {text},attempt {attempts}")
             embeddings = OpenAIEmbeddings(openai_api_key=alive_key)
             vector = embeddings.embed_query(text)
+            logger.info(f"end query embedding {text},embeddings {vector}")
             token_cost = token_str(text)
             logger.info(f"{attempts + 1} try,embed text: {text}")
             break
