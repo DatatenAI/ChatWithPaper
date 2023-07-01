@@ -33,4 +33,10 @@ from summary import delete_wrong_summary_res
 # delete_wrong_summary_res(file_hash, language, summary_temp)
 
 
+from fastapi import FastAPI, Query
+from pydantic import BaseModel, validator, Field
+import logging
+
+logger = logging.getLogger(__name__)
+app = FastAPI()
 

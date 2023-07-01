@@ -19,7 +19,7 @@ app = FastAPI()
 
 
 class RequestParams(BaseModel):
-    task_id: str = Field(..., description='任务表的task id')
+    task_id: int = Field(..., description='任务表的task id')
     user_type: str = Field(..., description="用户类型，可选值：user|spider")
 
     @validator('task_id', 'user_type')
@@ -31,14 +31,19 @@ class RequestParams(BaseModel):
 
 @app.get('/invoke')
 async def invoke(params: Request):
+    # 用户的task_id 用字符串
+    # 订阅的task_id 用uuid
     task_id = params.query_params.get('task_id')
     user_type = params.query_params.get('user_type')
+
     dumps = json.dumps({
         "task_id": task_id,
         "user_type": user_type,
     })
 
     threading.Thread(target=handler, args=(dumps,)).start()
+    # handler(dumps)
+    return 'success'
     # 在这里执行相应的任务处理逻辑
     # 可以根据传入的参数进行相应的操作
 

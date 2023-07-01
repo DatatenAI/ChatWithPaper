@@ -196,7 +196,7 @@ class UserTasks(BaseModelNew):
 
 # 任务表
 class SubscribeTasks(BaseModelNew):
-    id = AutoField(primary_key=True)
+    id = CharField(primary_key=True)
     type = CharField(choices=('SUMMARY', 'TRANSLATE'))
     tokens = IntegerField()
     pages = IntegerField()

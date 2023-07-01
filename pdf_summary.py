@@ -24,7 +24,7 @@ if os.getenv('ENV') == 'DEV':
 
 from modules.vectors.get_embeddings import embed_text, From_ChunkText_Get_Questions
 from modules.fileactioins.filesplit import get_paper_split_res
-from modules.util import retry, token_str, gen_uuid, save_to_file, load_from_file, print_token, save_data_to_json, \
+from modules.util import retry, token_str, gen_uuid, print_token, save_data_to_json, \
     load_data_from_json
 
 milvus_PaperDocManager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
@@ -260,6 +260,7 @@ async def get_the_formatted_summary_from_pdf(
 
     token_cost_all = 0
 
+    # TODO 事务一致性
     # 先检查数据库中是否存在,然后再
     question_data = db.PaperQuestions.get_or_none(db.PaperQuestions.pdf_hash == pdf_hash,
                                                   db.PaperQuestions.language == language,
