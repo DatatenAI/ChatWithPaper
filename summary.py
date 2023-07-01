@@ -171,7 +171,6 @@ async def process_summary(task_data):
             task_obj = db.UserTasks.update(
                 user_id=task_data['user_id'],
                 state='FAIL',
-                cost_credits=0,
                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ).where(
                 db.UserTasks.id == task_id
