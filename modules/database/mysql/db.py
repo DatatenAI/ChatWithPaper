@@ -91,8 +91,8 @@ class ApiKey(BaseModelNew):
     id = AutoField()
     key = CharField(unique=True)
     alive = BooleanField()
-    amount = DoubleField()
-    used = DoubleField()
+    amount = FloatField()
+    used = FloatField()
 
     class Meta:
         table_name = 'api_keys'

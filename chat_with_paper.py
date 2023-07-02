@@ -23,7 +23,6 @@ def handler(event_str):
         user_type = task_data["user_type"]
 
         if user_type == 'user':
-
             logger.info(f"task_id:{task_id}, user_type:{user_type}")
             try:
                 task = db.UserTasks.get_by_id(task_id)  # 从用户的任务表中取数据

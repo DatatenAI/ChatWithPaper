@@ -204,7 +204,6 @@ async def get_embeddings_from_pdf(path: str,
         flat_paper_chunks_json = []
         paper_chunks_data = db.PaperChunks.select().where(db.PaperChunks.pdf_hash == pdf_hash)
         if paper_chunks_data:
-            flat_paper_chunks_json = []
             # 将list中多个数据存储到json到
             flat_paper_chunks_json = []
             flat_paper_questions_json = []
@@ -232,8 +231,7 @@ async def get_embeddings_from_pdf(path: str,
             # chunk_ids.append(res.id)
         return info_token_cost
     else:
-        structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
-
+        # structure_path = os.path.join(os.getenv('FILE_PATH'), f"out/{pdf_hash}_structure.json")
         if not os.path.exists(path):
             raise FileNotFoundError(f"File {path} not found")
 
