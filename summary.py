@@ -31,7 +31,7 @@ def delete_wrong_file(file_path: str, file_size: int = None):
                 Path(file_path).unlink()
                 return True
             except Exception as e:
-                raise Exception(f"delete {file_path} error:{e}")
+                raise Exception(f"delete {file_path} error:{repr(e)}")
         return False
     else:
         if Path(file_path).is_file():
@@ -39,7 +39,7 @@ def delete_wrong_file(file_path: str, file_size: int = None):
                 Path(file_path).unlink()
                 return True
             except Exception as e:
-                raise Exception(f"delete {file_path} error:{e}")
+                raise Exception(f"delete {file_path} error:{repr(e)}")
         return False
 
 
@@ -113,11 +113,10 @@ async def summary(summary_data: SummaryData) -> Union[Tuple, None]:
             error_res = {"status": "error", "detail": f"summary temp error: no {summary_temp} temp"}
             raise json.dumps(error_res, ensure_ascii=False, indent=4)  # 返回错误信息
     except Exception as e:
-        logger.error(f"generate summary error:{e}", )
-        error_res = {"status": "error", "detail": str(e)}
+        logger.error(f"generate summary error:{repr(e)}", )
         # Delete any previous wrong summary results associated with the summary_id
         delete_wrong_summary_res(file_hash, language, summary_temp)
-        raise e
+        raise Exception(e)
 
 
 async def process_summary(task_data):
@@ -155,8 +154,7 @@ async def process_summary(task_data):
 
 
     except Exception as e:
-        logger.error(f"generate summary error:{e}", )
-        error_res = {"status": "error", "detail": str(e)}
+        logger.error(f"generate summary error:{repr(e)}", )
         # TODO 处理报错信息
         if user_type == 'spider':
             # TODO 写报错信息和改变状态
@@ -181,9 +179,9 @@ async def process_summary(task_data):
                 await user_db.update_points_add(user_id, pages, 'TASK')
                 logger.info(f"give back user {user_id}, points {pages} success")
             except Exception as e:
-                logger.error(f"give back user {user_id}, points {pages} fail {e}")
+                logger.error(f"give back user {user_id}, points {pages} fail {repr(e)}")
                 raise Exception(e)
-        raise e
+        raise Exception(e)
 
 
     token_cost_all = embeddings_tokens + summary_tokens
@@ -201,7 +199,7 @@ async def process_summary(task_data):
             logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
 
         except Exception as e:
-            logger.error(f"{e}")
+            logger.error(f"{repr(e)}")
 
     elif user_type == 'user':
         # 将数据写入到任务表中和summaries表中
@@ -220,7 +218,7 @@ async def process_summary(task_data):
             logger.info(f"finish Subscribe tasks {task_obj}, pdf_hash={pdf_hash}, tokens={token_cost_all}")
 
         except Exception as e:
-            logger.error(f"{e}")
+            logger.error(f"{repr(e)}")
 
     return None
 
@@ -230,7 +228,7 @@ async def testUserTask():
 
 
 async def test_SubTask():
-    task_id = '107'
+    task_id = 'bc9e390d-3bb5-4bf1-84cf-fb3bfb59b109'
     user_type = 'spider'
 
     task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)

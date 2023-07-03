@@ -39,7 +39,7 @@ def get_single_alive_key() -> Union[str, None]:
         #     return query_api_key.apikey
         # return None
     except Exception as e:
-        logger.error(f"get alive openai api key error,{e}")
+        logger.error(f"get alive openai api key error,{repr(e)}")
         return None
 
 

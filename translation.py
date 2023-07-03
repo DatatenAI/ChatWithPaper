@@ -126,9 +126,9 @@ async def process_translate(task_data):
                 await user_db.update_points_add(user_id, pages, 'TASK')
                 logger.info(f"give back user {user_id}, points {pages} success")
             except Exception as e:
-                logger.error(f"give back user {user_id}, points {pages} fail {e}")
+                logger.error(f"give back user {user_id}, points {pages} fail {repr(e)}")
                 raise Exception(e)
-        logger.error(f"{e}")
+        logger.error(f"{repr(e)}")
         raise e
 
 

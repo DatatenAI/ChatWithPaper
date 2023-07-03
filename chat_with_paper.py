@@ -67,21 +67,21 @@ def handler(event_str):
                     asyncio.run(process_translate(dumps))
                 return 'success'
             except Exception as e:
-                logger.error(f'sql error, spider task_id:{task_id} {e}')
+                logger.error(f'sql error, spider task_id:{task_id}, {repr(e)}')
         else:
             return 'error user type, need user|spider'
 
     except Exception as e:
-        logger.error(f"handler error: {e}")
+        logger.error(f"handler error: {repr(e)}")
 
 
-async def test_handler():
+def test_handler():
     dumps = json.dumps({
-        "task_id": 10,
+        "task_id": '7050d8a3-e37d-4bff-addb-379eac7417e5',
         "user_type": 'spider',
     })
     handler(dumps)
 
 if __name__ == '__main__':
     import uvicorn
-    asyncio.run(test_handler())
+    test_handler()

@@ -42,7 +42,7 @@ async def update_key(key) -> ApiKey:
         is_alive = True if key_state.alive else False
         if key_state.amount - key_state.used < 1:
             is_alive = False
-            key_state.live = is_alive
+            key_state.alive = is_alive
         task_obj = db.ApiKey.update(
             alive=key_state.alive,
             amount=key_state.amount,

@@ -48,7 +48,7 @@ async def release_lock(lock_name, identifier):
                 return True
             break
         except RedisError as e:
-            logger.error(f"release lock failed:{e}")
+            logger.error(f"release lock failed:{repr(e)}")
             pass
 
     return False

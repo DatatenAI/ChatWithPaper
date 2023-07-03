@@ -72,19 +72,15 @@ async def From_ChunkText_Get_Questions(text: str, language: str) -> tuple:
     )
     logger.info(f"input chunk text:{text}")
     logger.info(f"origin text length:{len(text)}")
-    content = f"""Original Paper chunked text is as follows: {text}, please extracted the most 5th possible questions reader may to ask in {language}. 
+    content = f"""Original Paper chunked text is as follows: {text}, please extracted the most 3th possible questions reader may to ask in {language}. 
         Remember to:
         - Retain proper nouns in original language.
-        - extracted the most 5th possible keywords for the text
-
+        - extracted the most five relevant keywords for the text
         Organize your response using the following markdown structure:
-
         # Possible questions to ask and answers:
         - Q1: xxx
-        - A1: xxx
-        
         - Q2: xxx
-        - A2: xxx
+        - Q3: xxx
         ...
         # keywords
         xxx, xxx,...
@@ -114,7 +110,7 @@ async def embed_text(text: str, max_attempts: int = 3) -> tuple:
             logger.info(f"{attempts + 1} try,embed text: {text}")
             break
         except Exception as e:
-            logger.error(f"Error embedding text: {e}")
+            logger.error(f"Error embedding text: {repr(e)}")
             attempts += 1
             if attempts < max_attempts:
                 logger.info("Retrying...")
@@ -133,7 +129,7 @@ async def StructuredResultsVectors(text: str, language: str = "English") -> tupl
         logger.info(f"Structured text:{text},tokens: {total_tokens}")
         return possible_text, vector, total_tokens
     except Exception as e:
-        logger.error(f"StructureResultsVectors error {e}")
+        logger.error(f"StructureResultsVectors error {repr(e)}")
         return None, None, None
 
 
@@ -176,7 +172,7 @@ async def process_pdf_info(pdf_model: PDFMetaInfoModel, language: str = "English
                              )
         return result
     except Exception as e:
-        logger.error(f"process pdf info vec error,err: {e}")
+        logger.error(f"process pdf info vec error,err: {repr(e)}")
         raise e
 
 

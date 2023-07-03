@@ -86,7 +86,7 @@ class MilvusPaperDocManager:
                 collection.create_index(field_name='pdf_hash', index_name="scalar_index", partition=self.partition_name)
 
             except Exception as e:
-                logger.error(e)
+                logger.error(f"{repr(e)}")
             return Collection(name=self.collection_name)
 
     def delete_collection(self):
@@ -99,7 +99,7 @@ class MilvusPaperDocManager:
                 logger.info(f"Collection '{self.collection_name}' does not exists")
                 return True
         except Exception as e:
-            logger.error(f"{e}")
+            logger.error(f"{repr(e)}")
         return False
 
     def gen_uuids(self, num: int)->List[str]:
@@ -125,8 +125,8 @@ class MilvusPaperDocManager:
             self.collection.flush()
             logger.info(f"end insert {self.collection_name},pdf_hash: {pdf_hash} vector data")
         except Exception as e:
-            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
-            raise e
+            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {repr(e)}")
+            raise Exception(e)
         return res.result()
 
     # async def insert_json_data(self, structure_path: str):
@@ -217,7 +217,7 @@ class MilvusPaperDocManager:
             status = self.collection.delete(expr=expr, partition_name=self.partition_name)
             logger.info(f"Data deleted successfully, pdf_hash:{pdf_hash}, {status.delete_count} datas")
         except Exception as e:
-            logger.error(f"Failed to delete data. Error:{e}")
+            logger.error(f"Failed to delete data. Error:{repr(e)}")
 
 
 class MilvusSinglePaperManager:
@@ -272,7 +272,7 @@ class MilvusSinglePaperManager:
 
 
             except Exception as e:
-                logger.error(e)
+                logger.error(f"error {repr(e)}")
             return Collection(name=self.collection_name)
 
     def delete_collection(self):
@@ -285,7 +285,7 @@ class MilvusSinglePaperManager:
                 logger.info(f"Collection '{self.collection_name}' does not exists")
                 return True
         except Exception as e:
-            logger.error(f"{e}")
+            logger.error(f"{repr(e)}")
         return False
 
     def gen_uuids(self, num: int):
@@ -315,7 +315,7 @@ class MilvusSinglePaperManager:
             self.collection.flush()
             logger.info(f"end insert {self.collection_name}, pdf_hash: {pdf_hash}, {num_vec} vector data")
         except Exception as e:
-            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {e}")
+            logger.error(f"insert {self.collection_name},pdf_hash:{pdf_hash}, vec error: {repr(e)}")
             raise e
         return res.result()
 
@@ -412,7 +412,7 @@ class MilvusSinglePaperManager:
             status = self.collection.delete(expr=expr, partition_name=self.partition_name)
             logger.info(f"Data deleted successfully, pdf_hash:{pdf_hash}, {status.delete_count} datas")
         except Exception as e:
-            logger.error(f"Failed to delete data. Error:{e}")
+            logger.error(f"Failed to delete data. Error:{repr(e)}")
 
 
     def update_vectors(self, vectors: List[List[float]], ids: List[int]):

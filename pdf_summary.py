@@ -221,8 +221,8 @@ async def read_str_files(file_path: str) -> str:
                 data = await f.read()
             return data
         except Exception as e:
-            logger.error(f"read {file_path} error {e}")
-            raise f"read {file_path} error {e}"
+            logger.error(f"read {file_path} error {repr(e)}")
+            raise Exception(e)
     else:
         return ""
 
@@ -312,7 +312,7 @@ async def get_the_formatted_summary_from_pdf(
                 complete_sum_res, first_page_conclusion, token_cost = await get_the_complete_summary(
                     pdf_file_path, language=language, summary_temp=summary_temp)  # 信息压缩
             except Exception as e:
-                logger.error(f"get the complete summary error: {e}")
+                logger.error(f"get the complete summary error: {repr(e)}")
                 raise Exception(str(e))
             token_cost_all += token_cost
             if complete_sum_res is None:
@@ -378,7 +378,7 @@ async def get_the_formatted_summary_from_pdf(
         # TODO
         question_obg = db.PaperQuestions.create(
             pdf_hash=pdf_hash,
-            language=language,
+            language='English',
             question=problem_to_ask,
             page=0,
             cost_tokens=problem_tokens
@@ -742,7 +742,7 @@ async def process_information(sentence: str, path: str, language: str):
         )
         return result
     except Exception as e:
-        logger.error(f"process information error,path {path},err: {e}")
+        logger.error(f"process information error,path {path},err: {repr(e)}")
         return "", 0
 
 
@@ -890,7 +890,7 @@ async def process_sentence(sentence: str, n: int):
                              n=n)
         return result
     except Exception as e:
-        logger.error(f"process sentence error,number:{n},err: {e}")
+        logger.error(f"process sentence error,number:{n},err: {repr(e)}")
         return e
 
 
@@ -902,7 +902,7 @@ async def get_condensed_text(
     """压缩信息"""
     text_hash = hash(text)
     logger.info(
-        f"{text_hash} get condensed text,n:{n},condensed length:{condensed_length},language:{language}")
+        f"text hash {text_hash} get condensed text,n:{n},condensed length:{condensed_length},language:{language}")
     if token_str(text) < 100:
         return text, 0
     convo_id = "core_summary" + gen_uuid()
@@ -934,7 +934,7 @@ async def get_condensed_text(
                                       convo_id=convo_id)
     chat_paper_api.conversation[convo_id] = None
     print_token(text_hash, result)
-    logger.info(f"{text_hash} end get condensed text")
+    logger.info(f"text hash: {text_hash} end get condensed text")
     return str(result[0]), result[3]
 
 
@@ -1283,15 +1283,15 @@ async def test_get_paper_split_res():
 
 
 async def test_rewrite_paper_and_extract_information():
-    pdf_path = '/temp/uploads/365fb87068e14e5e3fea64253d9d3c8b.pdf'
+    pdf_path = '../uploads/e23f8e1adc451df11f169c9408d4f52e.pdf'
     language = '中文'
     summary_temp = 'default'
     if os.path.exists(pdf_path):
-        print("file exists")
+        logger.error("file exists")
     else:
         return None
     res = await rewrite_paper_and_extract_information(pdf_path, language)
-    print(res)
+    logger.info(res)
     pass
 
 
