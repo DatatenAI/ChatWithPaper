@@ -77,7 +77,7 @@ async def From_ChunkText_Get_Questions(text: str, language: str) -> tuple:
         - Retain proper nouns in original language.
         - extracted the most five relevant keywords for the text
         Organize your response using the following markdown structure:
-        # Possible questions to ask and answers:
+        # Possible questions to ask:
         - Q1: xxx
         - Q2: xxx
         - Q3: xxx

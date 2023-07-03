@@ -234,7 +234,7 @@ async def test_SubTask():
     task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)
     if task.type.lower() == 'summary':  # 总结的任务
         logger.info("begin spider summary")
-        dumps = json.dumps({
+        task_data = {
             "user_type": user_type,
             "task_id": task_id,
             "user_id": 'chat-paper',  # 添加用户id
@@ -243,8 +243,7 @@ async def test_SubTask():
             "pages": task.pages,
             "pdf_hash": task.pdf_hash,
             "summary_temp": 'default'
-        }, ensure_ascii=False)
-        task_data = json.loads(dumps)
+        }
         res = await process_summary(task_data)
         print(res)
 

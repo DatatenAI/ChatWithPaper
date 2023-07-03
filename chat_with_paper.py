@@ -48,26 +48,32 @@ def handler(event_str):
         elif user_type == 'spider':
             logger.info(f"task_id:{task_id}, user_type:{user_type}")
             # 读取特定task_id行的数据
+            task = None
             try:
                 task = db.SubscribeTasks.get(db.SubscribeTasks.id == task_id)
                 logger.info("begin spider summary")
-                dumps = json.dumps({
-                    "user_id": 'chat-paper',
-                    "user_type": user_type,
-                    "task_id": task_id,
-                    "task_type": task.type,
-                    "language": task.language,
-                    "pages": task.pages,
-                    "pdf_hash": task.pdf_hash,
-                    "summary_temp": 'default'  # 总结模板
-                }, ensure_ascii=False)
-                if task.type.lower() == 'summary':
-                    asyncio.run(process_summary(dumps))
-                elif task.type.lower() == 'translate':
-                    asyncio.run(process_translate(dumps))
-                return 'success'
             except Exception as e:
                 logger.error(f'sql error, spider task_id:{task_id}, {repr(e)}')
+            if task:
+                try:
+                    dumps = {
+                        "user_id": 'chat-paper',
+                        "user_type": user_type,
+                        "task_id": task_id,
+                        "task_type": task.type,
+                        "language": task.language,
+                        "pages": task.pages,
+                        "pdf_hash": task.pdf_hash,
+                        "summary_temp": 'default'  # 总结模板
+                    }
+                    if task.type.lower() == 'summary':
+                        asyncio.run(process_summary(dumps))
+                    elif task.type.lower() == 'translate':
+                        asyncio.run(process_translate(dumps))
+                    return 'success'
+                except Exception as e:
+                    logger.error(f"process error {repr(e)}")
+                    raise Exception(e)
         else:
             return 'error user type, need user|spider'
 
@@ -77,7 +83,7 @@ def handler(event_str):
 
 def test_handler():
     dumps = json.dumps({
-        "task_id": '7050d8a3-e37d-4bff-addb-379eac7417e5',
+        "task_id": 'e89f0f1e-c6aa-43ca-9015-40fc47adb91a',
         "user_type": 'spider',
     })
     handler(dumps)
