@@ -28,16 +28,17 @@ from modules.util import retry, token_str, gen_uuid, print_token, save_data_to_j
     load_data_from_json
 
 milvus_PaperDocManager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
-                                       port=os.getenv("MILVUS_PORT"),
-                                       alias="default",
-                                       user=os.getenv("MILVUS_USER"),
-                                       password=os.getenv("MILVUS_PASSWORD"),
-                                       collection_name=Pdc.collection_name,
-                                       partition_name=Pdc.partition_name,
-                                       schema=Pdc.schema,
-                                       field_name=Pdc.field_name,
-                                       index_param=Pdc.index_param,
-                                       nprobe=10)
+                                               port=os.getenv("MILVUS_PORT"),
+                                               alias="default",
+                                               user=os.getenv("MILVUS_USER"),
+                                               password=os.getenv("MILVUS_PASSWORD"),
+                                               collection_name=Pdc.collection_name,
+                                               partition_name=Pdc.partition_name,
+                                               schema=Pdc.schema,
+                                               field_name=Pdc.field_name,
+                                               index_param=Pdc.index_param,
+                                               nprobe=10)
+
 
 async def Extract_Brief_Introduction(text: str, language: str) -> tuple:
     """
@@ -357,7 +358,6 @@ async def get_the_formatted_summary_from_pdf(
                 first_page_conclusion=first_page_conclusion,
                 content=final_res
             )
-
 
         # 向量化
         # 对这篇文章可能问的问题
@@ -698,18 +698,23 @@ async def translate_one_field(text, lang: str, field: str) -> tuple:
                                       role="user",
                                       convo_id=convo_id)
     chat_paper_api.conversation[convo_id] = None
+    logger.info(f"translation:{result[0]}")
     print_token(f"get_paper_{field}_translation", result)
     logger.info(f"end get paper {field} translation")
     return result[0], result[3]
 
 
-async def translate(texts: dict, lang: str) -> dict:
+async def translate(texts: dict, lang: str) -> tuple[dict, float]:
     translated_texts = {}
+    total_tokens = 0
     for field, text in texts.items():
-        translated_text = await translate_one_field(text, lang, field)
-        translated_texts[field] = translated_text[0]
-
-    return translated_texts
+        if text:
+            translated_text = await translate_one_field(text, lang, field)
+            translated_texts[field] = translated_text[0]
+            total_tokens += translated_text[1]
+        else:
+            translated_texts[field] = ''
+    return translated_texts, total_tokens
 
 
 def truncate_text(text, max_token=2560, steps=None):

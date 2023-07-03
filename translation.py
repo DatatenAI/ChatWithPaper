@@ -19,21 +19,28 @@ PDF_SAVE_DIR = os.path.join(os.getenv("FILE_PATH"), 'uploads')
 
 from pydantic import BaseModel
 
+
 class TranslateData(BaseModel):
     user_type: str
     pdf_hash: str
-    language: str
+    language: str  # 目标语言
     translate_temp: str
 
 
-async def translate(translate_data: TranslateData) -> dict:
+async def translate(translate_data: TranslateData) -> tuple[dict, float]:
+    """
+    输入的是
+    """
     pdf_hash = translate_data.pdf_hash
     user_type = translate_data.user_type
     language = translate_data.language
     translate_temp = translate_data.translate_temp
 
     try:
-        summary = db.Summaries.get(db.Summaries.pdf_hash == pdf_hash)
+        # TODO 将summary 和 paper_question都翻译了
+        summary = db.Summaries.select().where(
+            db.Summaries.pdf_hash == pdf_hash).order_by(
+            db.Summaries.create_time)[0]
 
         texts = {
             'basic info': summary.basic_info,
@@ -44,7 +51,7 @@ async def translate(translate_data: TranslateData) -> dict:
             'short length content': summary.short_content,
         }
 
-        translated_texts = await pdf_summary.translate(texts, language)
+        translated_texts, translate_tokens = await pdf_summary.translate(texts, language)
 
         new_summary = {
             'pdf_hash': summary.pdf_hash,
@@ -59,12 +66,12 @@ async def translate(translate_data: TranslateData) -> dict:
             'short_content': translated_texts['short length content'],
         }
 
-        return new_summary
+        return new_summary, translate_tokens
 
 
     except Exception as e:
         logger.error(f"translate error:{repr(e)}")
-        raise e
+        raise Exception(e)
 
 
 async def process_translate(task_data):
@@ -80,27 +87,41 @@ async def process_translate(task_data):
 
     logger.info(f"process translate user id {user_id}")
     try:
-        earliest_created_task = (
-            db.UserTasks.select()
-            .where(db.UserTasks.pdf_hash == pdf_hash,db.UserTasks.state == 'SUCCESS')
-            .order_by(db.UserTasks.created_at)
-            .first()
-        )
+        if user_type == 'user':
+            earliest_summary = db.Summaries.select().where(db.Summaries.pdf_hash == pdf_hash)
 
-        if earliest_created_task:
-            translate_data = TranslateData(
-                user_type=user_type,
-                pdf_hash=pdf_hash,
-                language=language,
-                translate_temp='default'
-            )
+            if earliest_summary:
+                translate_data = TranslateData(
+                    user_type=user_type,
+                    pdf_hash=pdf_hash,
+                    language=language,
+                    translate_temp='default'
+                )
 
-            new_summary = await translate(translate_data)
+                new_summary, translate_tokens = await translate(translate_data)
+                # 更新task 表 和 summary
+                try:
+                    with db.mysql_db_new.atomic():
+                        _, translated_info = db.Summaries.get_or_create(pdf_hash=new_summary['pdf_hash'],
+                                                                        language=new_summary['language'],
+                                                                        # 后面的模板
+                                                                        defaults=new_summary)
+                        if translated_info:
+                            logger.info(f'translate fields of summary, pdf_hash: {pdf_hash}')
+                            task_obj = db.UserTasks.update(state='SUCCESS',
+                                                           cost_credits=translate_tokens,
+                                                           finished_at=datetime.datetime.now().strftime(
+                                                               '%Y-%m-%d %H:%M:%S')
+                                                           ).where(db.UserTasks.id == task_id).execute()
+                            logger.info(f"translate success")
+                except Exception as e:
+                    logger.info(f"{e}")
+            else:
+                logger.info(f"no earliest summary task")
+        elif user_type == 'spider':
 
-            _, translated_info = db.Summaries.get_or_create(**new_summary)
-            if translated_info:
-                logger.info(f'translate fields of summary, pdf_hash: {pdf_hash}')
 
+            pass
     except Exception as e:
         # 还钱
         if user_type == 'spider':
@@ -113,43 +134,48 @@ async def process_translate(task_data):
 
         elif user_type == 'user':
             # 写报错信息
-            task_obj = db.UserTasks.update(
-                user_id=task_data['user_id'],
-                state='FAIL',
-                finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            ).where(
-                db.UserTasks.id == task_id
-            ).execute()
-            logger.info(f"Fail User:{user_id} tasks {task_obj}, pdf_hash={pdf_hash}")
-            # 还钱
             try:
-                await user_db.update_points_add(user_id, pages, 'TASK')
-                logger.info(f"give back user {user_id}, points {pages} success")
+                with db.mysql_db_new.atomic():
+                    task_obj = db.UserTasks.update(
+                        user_id=task_data['user_id'],
+                        state='FAIL',
+                        finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    ).where(db.UserTasks.id == task_id).execute()
+                    logger.info(f"Fail translate, User:{user_id} tasks {task_id}, pdf_hash={pdf_hash}")
+                    await user_db.update_points_add(user_id, pages, 'TASK')
+                    # 还钱
+                    logger.info(f"give back user {user_id}, points {pages} success")
             except Exception as e:
                 logger.error(f"give back user {user_id}, points {pages} fail {repr(e)}")
                 raise Exception(e)
         logger.error(f"{repr(e)}")
-        raise e
-
-
+        raise Exception(e)
 
 
 async def test_process_translate():
-    user_type = 'spider'
+    user_type = 'user'
 
-    logger.info("begin spider translation")
+    logger.info("begin translation")
+    task = db.UserTasks.get(db.UserTasks.id == 'abcd')
+    logger.info("begin spider summary")
     dumps = json.dumps({
+        "user_id": task.user_id,
         "user_type": user_type,
-        "user_id": 'chat-paper',  # 添加用户id
-        "temp": 'default'
+        "task_id": task.id,
+        "task_type": task.type,
+        "language": task.language,
+        "pages": task.pages,
+        "pdf_hash": task.pdf_hash,
+        "translate_temp": 'default'  # 总结模板
     }, ensure_ascii=False)
     task_data = json.loads(dumps)
     await process_translate(task_data)
 
+
 async def test_translate():
     translate_data = TranslateData(
         user_type='spider',
-        pdf_hash='29e507c6562a444ce50b131453324c41',
+        pdf_hash='e23f8e1adc451df11f169c9408d4f52e',
         language='English',
         translate_temp='default'
     )
