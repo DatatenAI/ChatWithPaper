@@ -361,36 +361,43 @@ async def get_the_formatted_summary_from_pdf(
 
         # 向量化
         # 对这篇文章可能问的问题
-        problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
-        token_cost_all += problem_tokens
-        meta_data = json.dumps({
-            "title": title,
-            "title_zh": title_zh,
-            "basic_info": basic_info,
-            "brief_intro": brief_introduction,
-            "summary": final_res,
-            "problem_to_ask": problem_to_ask
-        }, ensure_ascii=False, indent=4)
-        pdf_vec, vec_tokens = await embed_text(meta_data)
-        token_cost_all += vec_tokens
+        try:
+            problem_to_ask, problem_tokens = await From_ChunkText_Get_Questions(final_res, language='English')
+            token_cost_all += problem_tokens
+            meta_data = json.dumps({
+                "title": title,
+                "title_zh": title_zh,
+                "basic_info": basic_info,
+                "brief_intro": brief_introduction,
+                "summary": final_res,
+                "problem_to_ask": problem_to_ask
+            }, ensure_ascii=False, indent=4)
+            pdf_vec, vec_tokens = await embed_text(meta_data)
+            token_cost_all += vec_tokens
 
-        # 存入 db 和 vec db
-        # TODO
-        question_obg = db.PaperQuestions.create(
-            pdf_hash=pdf_hash,
-            language='English',
-            question=problem_to_ask,
-            page=0,
-            cost_tokens=problem_tokens
-        )
-        token_cost_all += problem_tokens
-        logger.info(f"insert PaperQuestions, pdf_hash summary:{pdf_hash},cost_tokens={problem_tokens}")
+            # 存入 db 和 vec db
+            # TODO
+            question_obg = db.PaperQuestions.create(
+                pdf_hash=pdf_hash,
+                language='English',
+                question=problem_to_ask,
+                page=0,
+                cost_tokens=problem_tokens
+            )
+            token_cost_all += problem_tokens
+            logger.info(f"insert PaperQuestions, pdf_hash summary:{pdf_hash},cost_tokens={problem_tokens}")
 
-        await milvus_PaperDocManager.insert_data(ids=gen_uuid(),
-                                                 vecs=pdf_vec,
-                                                 pdf_hash=pdf_hash,
-                                                 sql_id=question_obg.id)
-
+            # TODO 检查是否已经存过，没有才插入
+            res = await milvus_PaperDocManager.search_ids_by_pdf_hash(pdf_hash=pdf_hash)
+            if res:    # 如果存在，就跳过插入
+                pass
+            else:
+                await milvus_PaperDocManager.insert_data(ids=gen_uuid(),
+                                                         vecs=pdf_vec,
+                                                         pdf_hash=pdf_hash,
+                                                         sql_id=question_obg.id)
+        except Exception as e:
+            logger.error(f"paper summary question error: {repr(e)}")
         # await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
         # 在这儿存最终的总结文本信息：
         # save file title_path

@@ -46,6 +46,7 @@ class MilvusPaperDocManager:
                  field_name: str = Pdc.field_name,
                  index_param=Pdc.index_param,
                  output_field=Pdc.output_field,
+                 search_field=Pdc.search_field,
                  nprobe=10):
         connections.connect(host=host,
                             port=port,
@@ -59,6 +60,7 @@ class MilvusPaperDocManager:
         self.field_name = field_name
         self.index_param = index_param
         self.output_field = output_field
+        self.search_field = search_field
         self.nprobe = nprobe
 
         self.collection = self._get_collection()
@@ -170,7 +172,7 @@ class MilvusPaperDocManager:
                                                anns_field=self.field_name,
                                                param=search_param,
                                                limit=top_k,
-                                               output_fields=self.output_field,
+                                               output_fields=self.search_field,
                                                partition_names=[self.partition_name] if self.partition_name else None,
                                                _async=True)
         results = search_future.result()
@@ -192,7 +194,7 @@ class MilvusPaperDocManager:
                                                limit=top_k,
                                                expr=f"pdf_hash == \"{pdf_hash}\"",
                                                partition_names=[self.partition_name] if self.partition_name else None,
-                                               output_fields=self.output_field, _async=True)
+                                               output_fields=self.search_field, _async=True)
 
         return search_future.result()[0]
 
@@ -233,6 +235,7 @@ class MilvusSinglePaperManager:
                  field_name: str = Spc.field_name,
                  index_param=Spc.index_param,
                  output_field=Spc.output_field,
+                 search_field=Spc.search_field,
                  nprobe=10):
         connections.connect(host=host,
                             port=port,
@@ -246,6 +249,7 @@ class MilvusSinglePaperManager:
         self.field_name = field_name
         self.index_param = index_param
         self.output_field = output_field
+        self.search_field = search_field
         self.nprobe = nprobe
 
         self.collection = self._get_collection()
@@ -366,7 +370,7 @@ class MilvusSinglePaperManager:
                                                anns_field=self.field_name,
                                                param=search_param,
                                                limit=top_k,
-                                               output_fields=self.output_field,
+                                               output_fields=self.search_field,
                                                partition_names=[self.partition_name] if self.partition_name else None,
                                                _async=True)
         results = search_future.result()
@@ -422,6 +426,8 @@ class MilvusSinglePaperManager:
         pass
 
 
+
+
 async def test_paper():
     manager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
                                        port=os.getenv("MILVUS_PORT"),
@@ -473,10 +479,35 @@ async def test_single():
     res2 = await manager.delete_by_hash(pdf_hash=pdf_hash)
     print(res)
 
+async def test_hash_search():
+
+    hash = '91f04128ae2d255d7a6ebb3259f69a43'
+    manager = MilvusPaperDocManager(host=os.getenv("MILVUS_HOST"),
+                                    port=os.getenv("MILVUS_PORT"),
+                                    alias="default",
+                                    user=os.getenv("MILVUS_USER"),
+                                    password=os.getenv("MILVUS_PASSWORD"),
+                                    collection_name=Pdc.collection_name,
+                                    partition_name=Pdc.partition_name,
+                                    schema=Pdc.schema,
+                                    field_name=Pdc.field_name,
+                                    output_field=Pdc.output_field,
+                                    index_param=Pdc.index_param,
+                                    nprobe=10)
+
+    res = await manager.search_ids_by_pdf_hash(pdf_hash=hash)
+    print(res)
+
+
 if __name__ == "__main__":
     # 示例用法
 
 
     # asyncio.run(test_single())
 
-    asyncio.run(test_paper())
+    # asyncio.run(test_paper())
+
+    asyncio.run(test_hash_search())
+
+
+

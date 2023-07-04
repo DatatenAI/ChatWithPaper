@@ -9,6 +9,7 @@ collection_name = "SinglePaperDocVector"
 partition_name = "SinglePapers"
 field_name = "chunk_vector"
 output_field = ["paper_id", "pdf_hash", "chunk_id", "page"]
+search_field = ["paper_id", "pdf_hash", "chunk_id", "page"]
 
 paper_id = FieldSchema(
     name="paper_id",

@@ -10,7 +10,7 @@ collection_name = "PaperSummaryDocVector"
 partition_name = "Papers"
 field_name = "summary_vector"
 output_field = ["paper_id", "summary_vector", "pdf_hash", "sql_id"]
-
+search_field = ["paper_id", "pdf_hash", "sql_id"]
 paper_id = FieldSchema(
     name="paper_id",
     dtype=DataType.VARCHAR,
