@@ -159,7 +159,6 @@ async def process_summary(task_data):
         if user_type == 'spider':
             # TODO 写报错信息和改变状态
             task_obj = db.SubscribeTasks.update(state='FAIL',
-                                                tokens=0,
                                                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                                 ).where(db.SubscribeTasks.id == task_id).execute()
             logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
