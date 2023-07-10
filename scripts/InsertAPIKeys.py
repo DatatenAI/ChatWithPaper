@@ -35,7 +35,7 @@ async def test():
     print(local_apikeys)
 
     for key in local_apikeys:
-        key_state = query_key_info(key)
+        key_state = await query_key_info(key)
         if key_state:
 
             data_tasks = {
@@ -50,6 +50,7 @@ async def test():
 
             if key_create:
                 logger.info(f"add key:{key_state.key}, amount={key_state.amount}, used={key_state.used}")
-
+        else:
+            logger.error(f"error key:{key}")
 if __name__ == "__main__":
     asyncio.run(test())

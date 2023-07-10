@@ -130,7 +130,7 @@ async def process_translate(task_data):
                                                 tokens=0,
                                                 finished_at=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                                 ).where(db.SubscribeTasks.id == task_id).execute()
-            logger.info(f"Fail Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
+            logger.info(f"Fail translate Subscribe tasks {task_obj}, pdf_hash={pdf_hash}")
 
         elif user_type == 'user':
             # 写报错信息

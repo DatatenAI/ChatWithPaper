@@ -241,6 +241,7 @@ async def get_the_formatted_summary_from_pdf(
         pdf_file_path: str,
         language: str = "Chinese",
         summary_temp: str = 'default',
+        user_type: str = 'user'
 ):
     """
     传入pdf的路径，语言，总结的模板
@@ -348,16 +349,7 @@ async def get_the_formatted_summary_from_pdf(
             title_zh = re.sub(r'\\+n', '\n', title_zh)
 
             # 插入Summaries
-            summary_obg = db.Summaries.create(
-                pdf_hash=pdf_hash,
-                language=language,
-                title=title,
-                title_zh=title_zh,
-                basic_info=basic_info,
-                brief_introduction=brief_introduction,
-                first_page_conclusion=first_page_conclusion,
-                content=final_res
-            )
+
 
         # 向量化
         # 对这篇文章可能问的问题
@@ -374,16 +366,25 @@ async def get_the_formatted_summary_from_pdf(
             }, ensure_ascii=False, indent=4)
             pdf_vec, vec_tokens = await embed_text(meta_data)
             token_cost_all += vec_tokens
-
-            # 存入 db 和 vec db
-            # TODO
-            question_obg = db.PaperQuestions.create(
-                pdf_hash=pdf_hash,
-                language='English',
-                question=problem_to_ask,
-                page=0,
-                cost_tokens=problem_tokens
-            )
+            with db.mysql_db_new.atomic():
+                summary_obg = db.Summaries.create(
+                    pdf_hash=pdf_hash,
+                    language=language,
+                    title=title,
+                    title_zh=title_zh,
+                    basic_info=basic_info,
+                    brief_introduction=brief_introduction,
+                    first_page_conclusion=first_page_conclusion,
+                    content=final_res
+                )
+                # 存入 db 和 vec db
+                question_obg = db.PaperQuestions.create(
+                    pdf_hash=pdf_hash,
+                    language='English',
+                    question=problem_to_ask,
+                    page=0,
+                    cost_tokens=problem_tokens
+                )
             token_cost_all += problem_tokens
             logger.info(f"insert PaperQuestions, pdf_hash summary:{pdf_hash},cost_tokens={problem_tokens}")
 
@@ -396,6 +397,7 @@ async def get_the_formatted_summary_from_pdf(
                                                          vecs=pdf_vec,
                                                          pdf_hash=pdf_hash,
                                                          sql_id=question_obg.id)
+                logger.info(f"insert PaperDoc milvus data: pdf_hash:{pdf_hash},sql:{question_obg.id}")
         except Exception as e:
             logger.error(f"paper summary question error: {repr(e)}")
         # await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
@@ -455,7 +457,6 @@ async def get_the_formatted_summary_from_pdf(
     #         }
     #         await save_data_to_json(pdf_vec_info, pdf_vec_path)  # 存储单篇文章的向量化内容
     #
-    #
     #     return title, title_zh, basic_info, brief_intro, first_page_conclusion, final_res, pdf_vec, token_cost_all
 
 
@@ -470,28 +471,32 @@ async def get_the_complete_summary(pdf_file_path: str, language: str, summary_te
     result = None
     token_cost_all = 0
     # 开始处理长文本内容。
-    if not os.path.isfile(new_path) or os.path.getsize(new_path) < 1000:  # 如果不存在或者小于 1000 字节
+    try:
         result, first_page_info, token = await rewrite_paper_and_extract_information(
             pdf_file_path, language=language)
+
         token_cost_all += token
         # save file complete
         await save_str_files(result, new_path)
         await save_str_files(first_page_info, first_page_path)
-    elif not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 100:
-        sentences = await get_paper_split_res(pdf_file_path)  # 将paper内容拆分
-        if len(sentences) == 0:
-            raise Exception("there is no text in the paper")
-        # 当选择16K模型时，则不需要压缩：
-        # tasks = [process_information(sentences[0], pdf_file_path, language=language)]
-        # result, token_cost = await asyncio.gather(*tasks)
-        result = "\n".join(sentences)
-        token_cost_all += 0
-    # read file
-    result = await read_str_files(new_path)
-    first_page_info = await read_str_files(first_page_path)
-    logger.info(f"end get complete summary,token_cost_all: {token_cost_all}")
-    return result, first_page_info, token_cost_all
 
+    # elif not os.path.isfile(first_page_path) or os.path.getsize(first_page_path) < 100:
+    #     sentences = await get_paper_split_res(pdf_file_path)  # 将paper内容拆分
+    #     if len(sentences) == 0:
+    #         raise Exception("there is no text in the paper")
+    #     # 当选择16K模型时，则不需要压缩：
+    #     # tasks = [process_information(sentences[0], pdf_file_path, language=language)]
+    #     # result, token_cost = await asyncio.gather(*tasks)
+    #     result = "\n".join(sentences)
+    #     token_cost_all += 0
+    # read file
+        result = await read_str_files(new_path)
+        first_page_info = await read_str_files(first_page_path)
+        logger.info(f"end get complete summary,token_cost_all: {token_cost_all}")
+        return result, first_page_info, token_cost_all
+    except Exception as e:
+        logger.error(f"complete_summary error:{repr(e)}")
+        raise Exception(e)
 
 async def rewrite_paper_and_extract_information(path: str, language: str) -> tuple:
     # 先开始压缩全文信息
@@ -513,8 +518,8 @@ async def rewrite_paper_and_extract_information(path: str, language: str) -> tup
     # 使用 asyncio.gather() 并行执行两个任务
     results, informations = await asyncio.gather(asyncio.gather(*sentence_tasks), information_task)
     if information_task is None or results[0] is None:
-        logger.error(f"process_information error return None")
-        raise f"process_information error return None"
+        logger.error(f"rewrite_paper_and_extract_information error return None")
+        raise Exception("rewrite_paper_and_extract_information error return None")
 
     # 解包获取每个任务的结果
 
@@ -1295,7 +1300,7 @@ async def test_get_paper_split_res():
 
 
 async def test_rewrite_paper_and_extract_information():
-    pdf_path = '../uploads/e23f8e1adc451df11f169c9408d4f52e.pdf'
+    pdf_path = '../uploads/027f5cde861c326242a2203228e8560d.pdf'
     language = '中文'
     summary_temp = 'default'
     if os.path.exists(pdf_path):

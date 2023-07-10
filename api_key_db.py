@@ -30,7 +30,7 @@ def get_single_alive_key() -> Union[str, None]:
         query_api_keys = db.ApiKey.select().order_by(db.ApiKey.used.asc()).where(
             db.ApiKey.alive == True)
         keys = [apiKey.key for apiKey in query_api_keys]
-        key_res = [apiKey.amount - apiKey.used for apiKey in query_api_keys]
+        key_res = [abs(apiKey.amount - apiKey.used) for apiKey in query_api_keys]
         index = get_index_by_probability(key_res)
         key = keys[index]
         logger.info(f"get single api key: {key}")

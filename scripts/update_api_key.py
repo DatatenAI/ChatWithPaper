@@ -38,20 +38,24 @@ def get_headers(key: str) -> dict:
 async def update_key(key) -> ApiKey:
 
     try:
-        key_state = query_key_info(key)
-        is_alive = True if key_state.alive else False
-        if key_state.amount - key_state.used < 1:
-            is_alive = False
-            key_state.alive = is_alive
-        task_obj = db.ApiKey.update(
-            alive=key_state.alive,
-            amount=key_state.amount,
-            used=key_state.used
-        ).where(
-            db.ApiKey.key == key_state.key
-        ).execute()
-        logger.info(f"update key:{key_state.key}, alive={is_alive}, amount={key_state.amount}, used={key_state.used}")
-        return key_state
+        key_state = await query_key_info(key)
+        if key_state:
+            task_obj = db.ApiKey.update(
+                alive=key_state.alive,
+                amount=key_state.amount,
+                used=key_state.used
+            ).where(
+                db.ApiKey.key == key_state.key
+            ).execute()
+            logger.info(f"update key:{key_state.key}, alive={key_state.alive}, amount={key_state.amount}, used={key_state.used}")
+            return key_state
+        else:
+            task_obj = db.ApiKey.update(
+                alive=False,
+            ).where(
+                db.ApiKey.key == key
+            ).execute()
+            logger.error(f"query no info key:{key}")
     except Exception as e:
         logger.error(f"update error {repr(e)}")
 
@@ -66,11 +70,11 @@ async def update_schedule():
     api_keys = [res.key for res in api_keys_get]
     # 拆分chunks
     if len(api_keys) < 20:
-        num_chunks = len(api_keys)
+        chunk_size = len(api_keys)
     else:
-        num_chunks = int(len(api_keys) / 20)
-    logger.info(f"split {len(api_keys)} into {num_chunks} chunks")
-    split_api_keys = split_list(api_keys, num_chunks)
+        chunk_size = int(len(api_keys) / 20)+1
+    logger.info(f"split {len(api_keys)} into {chunk_size} chunks")
+    split_api_keys = split_list(api_keys, chunk_size)
 
     api_tasks = [update_keys(res) for res in split_api_keys]
     results = await asyncio.gather(*api_tasks)

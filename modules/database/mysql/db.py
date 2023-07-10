@@ -40,6 +40,65 @@ class User(BaseModel):
     class Meta:
         table_name = 'usersNew'
 
+class ChatPaper(BaseModel):
+    id = AutoField()
+    pdf_hash = CharField()
+    query = TextField()
+    user_id = CharField()
+    content = TextField()
+    token_cost = IntegerField()
+    pages = CharField()
+    created_at = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = 'ChatPaper'
+class UserToken(BaseModel):
+    id = AutoField()
+    user_id = CharField(unique=True)
+    tokens_purchased = FloatField(default=0)
+    tokens_consumed = FloatField(default=0)
+
+    class Meta:
+        table_name = 'user_tokens'
+class Paper(BaseModel):
+    id = IntegerField()
+    year = IntegerField()
+    pub_date = DateTimeField()
+    conference = CharField()
+    openreview_id = CharField()
+    keywords = TextField()
+    pdf_hash = CharField()
+    url_add_sclib = TextField()
+    bibtex = TextField()
+    pub_url = TextField()
+    url_scholarbib = TextField()
+    title = CharField()
+    tl_dr = TextField()
+    abstract = TextField()
+    venue = CharField()
+    authors = TextField()
+    code = TextField()
+    eprint_url = TextField()
+    num_citations = IntegerField()
+    summary = TextField()
+    cited_by_url = TextField()
+    openreview_link = TextField()
+    complete_summary = TextField()
+    url_related_articles = TextField()
+
+    class Meta:
+        table_name = 'Paper'
+
+class PaperDocVector(BaseModel):
+    id = AutoField()
+    pdf_hash = CharField(null=True)
+    page_content = TextField()
+    vector_id = IntegerField()
+
+
+# ——————————————————New ——————————————————————————————
+
+
 class Accounts(BaseModelNew):
     id = AutoField()
     user_id = CharField()
@@ -77,16 +136,6 @@ class CreditHistories(BaseModelNew):
         table_name = 'credit_histories'
 
 
-class UserToken(BaseModel):
-    id = AutoField()
-    user_id = CharField(unique=True)
-    tokens_purchased = FloatField(default=0)
-    tokens_consumed = FloatField(default=0)
-
-    class Meta:
-        table_name = 'user_tokens'
-
-
 class ApiKey(BaseModelNew):
     id = AutoField()
     key = CharField(unique=True)
@@ -96,29 +145,6 @@ class ApiKey(BaseModelNew):
 
     class Meta:
         table_name = 'api_keys'
-
-
-class ChatPaper(BaseModel):
-    id = AutoField()
-    pdf_hash = CharField()
-    query = TextField()
-    user_id = CharField()
-    content = TextField()
-    token_cost = IntegerField()
-    pages = CharField()
-    created_at = DateTimeField(default=datetime.datetime.now)
-
-    class Meta:
-        table_name = 'ChatPaper'
-
-
-class PaperDocVector(BaseModel):
-    id = AutoField()
-    pdf_hash = CharField(null=True)
-    page_content = TextField()
-    vector_id = IntegerField()
-
-
 
 
 class PaperQuestions(BaseModelNew):
@@ -148,12 +174,11 @@ class PaperChunks(BaseModelNew):
     class Meta:
         table_name = 'paper_chunks'
 
-
-
 class PaperInfo(BaseModelNew):
     id = AutoField(primary_key=True)
     url = CharField()   # 文章网页连接
     pdf_url = CharField()   # pdf url
+    search_From = CharField()   # 来自哪里
     eprint_url = CharField()   # 预印版pdf url
     pdf_hash = CharField()  # pdf hash
     year = IntegerField()   # 年份

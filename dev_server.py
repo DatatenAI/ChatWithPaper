@@ -44,28 +44,6 @@ async def invoke(params: Request):
     threading.Thread(target=handler, args=(dumps,)).start()
     # handler(dumps)
     return 'success'
-    # 在这里执行相应的任务处理逻辑
-    # 可以根据传入的参数进行相应的操作
-
-    # 靠pdf_hash, language, type来执行
-
-    # if summary_id is None:
-    #     return 'failed'
-    #
-    # summary_key = f"subscribe_summary:{summary_id}"
-    # # 判断是否是订阅的
-    # pdf_url = await redis_manager.get(summary_key)
-    # pdf_url = pdf_url.decode('utf-8')
-    # if pdf_url:
-    #     logger.info("begin subscribe summary")
-    #     dumps = json.dumps({"summary_id": summary_id})
-    #     threading.Thread(target=handler_subscribe, args=(dumps,)).start()
-    #     return 'success'
-    # else:
-    #     dumps = json.dumps({"summary_id": summary_id})
-    #     threading.Thread(target=handler, args=(dumps,)).start()
-    #     return 'success'
-
 
 if __name__ == '__main__':
     import uvicorn
