@@ -11,8 +11,15 @@ redis = aioredis.from_url(os.getenv("REDIS_URL"))
 
 
 async def set(key, value):
-    await redis.set(key, value)
+    return await redis.set(key, value)
 
+async def get(key):
+    return await redis.get(key)
+
+async def delete(key):
+    if redis is None:
+        raise Exception("Redis is not connected")
+    return await redis.delete(key)
 
 async def acquire_lock(lock_name, acquire_timeout=30, lock_timeout=30):
     identifier = str(uuid.uuid4())
@@ -41,7 +48,7 @@ async def release_lock(lock_name, identifier):
                 return True
             break
         except RedisError as e:
-            logger.error(f"release lock failed:{e}")
+            logger.error(f"release lock failed:{repr(e)}")
             pass
 
     return False
